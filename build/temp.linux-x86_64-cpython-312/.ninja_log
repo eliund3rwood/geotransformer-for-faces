@@ -1,0 +1,7 @@
+# ninja log v7
+48	594	1767997703038721100	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/extra/cloud/cloud.o	83de56f733aeef7b
+31	808	1767997703021498400	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/cpu/grid_subsampling/grid_subsampling_cpu.o	b60e1695ff63bb94
+43	956	1767997703031831200	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/cpu/radius_neighbors/radius_neighbors_cpu.o	716316f31da2a433
+53	18569	1767997703044334100	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/pybind.o	64cd5804dd751ca2
+27	19224	1767997703016133900	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/cpu/grid_subsampling/grid_subsampling.o	c1f4905ff4c023c9
+36	19237	1767997703027055700	/workspace/src/build/temp.linux-x86_64-cpython-312/geotransformer/extensions/cpu/radius_neighbors/radius_neighbors.o	c97879ef42fd877f

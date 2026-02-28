@@ -1,0 +1,31 @@
+FROM nvcr.io/nvidia/pytorch:25.12-py3
+
+COPY . /workspace/src
+
+WORKDIR /workspace/src
+
+RUN apt-get update && apt-get install -y \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxi6 \
+    libgl1 \
+    libglib2.0-0 \
+    libegl1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. Install standard requirements
+RUN pip install -r requirements.txt
+
+# 2. Install PyTorch3D from source
+# LIMIT JOBS to 4 to prevent OOM crash on 14GB RAM
+ENV MAX_JOBS=4
+ENV FORCE_CUDA=1
+RUN pip install "git+https://github.com/facebookresearch/pytorch3d.git" --no-build-isolation --no-cache-dir
+
+# 3. Install your package
+RUN pip install --no-build-isolation -e .
+
+ENV WEBRTC_IP=127.0.0.1 
+ENV WEBRTC_PORT=8890

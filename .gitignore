@@ -1,0 +1,10 @@
+# Ignore data directories
+data/
+scans/
+output/
+UHM_downsampled/
+UHM_generated_data/
+
+# Ignore specific model files
+pca_basis_all.pth
+experiments/pca_basis_all.pth
