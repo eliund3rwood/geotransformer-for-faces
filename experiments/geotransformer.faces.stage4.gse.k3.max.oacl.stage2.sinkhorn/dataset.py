@@ -14,6 +14,11 @@ def train_valid_data_loader(cfg, distributed):
         use_augmentation=cfg.train.use_augmentation,
         augmentation_noise=cfg.train.augmentation_noise,
         augmentation_rotation=cfg.train.augmentation_rotation,
+        # ======================================
+        aug_scale_min=0.7,
+        aug_scale_max=1.3,
+        aug_subsample_keep_min= 0.7,
+        # ======================================
     )
     neighbor_limits = calibrate_neighbors_stack_mode(
         train_dataset,
@@ -65,6 +70,11 @@ def test_data_loader(cfg, benchmark):
         use_augmentation=cfg.train.use_augmentation,
         augmentation_noise=cfg.train.augmentation_noise,
         augmentation_rotation=cfg.train.augmentation_rotation,
+        # ======================================
+        aug_scale_min=0.7,
+        aug_scale_max=1.3,
+        aug_subsample_keep_min= 0.7,
+        # ======================================
     )
     neighbor_limits = calibrate_neighbors_stack_mode(
         train_dataset,

@@ -25,6 +25,14 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         use_augmentation=False,
         augmentation_noise=0.005,
         augmentation_rotation=1,
+
+        # ======================================
+        # NEW ARGS
+        aug_scale_min=0.7,
+        aug_scale_max=1.3,
+        aug_subsample_keep_min=0.7,
+        # ======================================
+
         overlap_threshold=None,
         return_corr_indices=False,
         matching_radius=None,
@@ -49,6 +57,13 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         self.use_augmentation = use_augmentation
         self.aug_noise = augmentation_noise
         self.aug_rotation = augmentation_rotation
+
+        # ======================================
+        # NEW
+        self.aug_scale_min = aug_scale_min
+        self.aug_scale_max = aug_scale_max
+        self.aug_subsample_keep_min = aug_subsample_keep_min
+        # ======================================
 
         with open(osp.join(self.metadata_root, f'{subset}.pkl'), 'rb') as f:
             self.metadata_list = pickle.load(f)
@@ -126,7 +141,29 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
             src_points = np.matmul(src_points, src_rotation.T)
             rotation = np.matmul(rotation, src_rotation.T)
 
+        # ======================================
+        scale_factor = 1.0
+        if self.use_augmentation:
+            # Subsampling
+            if random.random() > 0.5:
+                num_points = src_points.shape[0]
+                keep_ratio = random.uniform(self.aug_subsample_keep_min, 1.0)
+                keep_points = int(num_points * keep_ratio)
+                indices = np.random.choice(num_points, keep_points, replace=False)
+                src_points = src_points[indices]
+            # Scale Augmentation 
+            if random.random() > 0.5:
+                scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
+                src_points = src_points * scale_factor
+        # ======================================
+
         transform = get_transform_from_rotation_translation(rotation, translation)
+
+        # ======================================
+        # Apply inverse scale to rotation block of transform matrix so GT alignment loss works flawlessly on scaled source points
+        if scale_factor != 1.0:
+            transform[:3, :3] = transform[:3, :3] / scale_factor
+        # ======================================
 
         # get correspondences
         if self.return_corr_indices:
@@ -142,5 +179,6 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         data_dict['morphed_full'] = morphed_full.astype(np.float32)
 
         data_dict['gt_z'] = gt_z
+
 
         return data_dict

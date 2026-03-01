@@ -4,7 +4,14 @@ scans/
 output/
 UHM_downsampled/
 UHM_generated_data/
+experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/viz_debug
 
 # Ignore specific model files
 pca_basis_all.pth
-experiments/pca_basis_all.pth
+experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/pca_basis_all.pth
+pick_superpoints.ipynb
+plank_faces.ipynb
+superpoint_patch_demo.py
+superpoint_viz.py
+superpoint_w_neighbors.py
+zzz.py
