@@ -27,7 +27,6 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         augmentation_rotation=1,
 
         # ======================================
-        # NEW ARGS
         aug_scale_min=0.7,
         aug_scale_max=1.3,
         aug_subsample_keep_min=0.7,
@@ -59,7 +58,6 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         self.aug_rotation = augmentation_rotation
 
         # ======================================
-        # NEW
         self.aug_scale_min = aug_scale_min
         self.aug_scale_max = aug_scale_max
         self.aug_subsample_keep_min = aug_subsample_keep_min
@@ -160,7 +158,7 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         transform = get_transform_from_rotation_translation(rotation, translation)
 
         # ======================================
-        # Apply inverse scale to rotation block of transform matrix so GT alignment loss works flawlessly on scaled source points
+        # Apply inverse scale to rotation block of transform matrix
         if scale_factor != 1.0:
             transform[:3, :3] = transform[:3, :3] / scale_factor
         # ======================================
