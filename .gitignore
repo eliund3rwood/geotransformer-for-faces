@@ -15,4 +15,5 @@ superpoint_patch_demo.py
 superpoint_viz.py
 superpoint_w_neighbors.py
 zzz.py
-experiments\geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn\pick_points.ipynb
+experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/pick_points.ipynb
+
