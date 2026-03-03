@@ -153,14 +153,12 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
             if random.random() > 0.5:
                 scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
                 src_points = src_points * scale_factor
-        # ======================================
 
-        transform = get_transform_from_rotation_translation(rotation, translation)
+        # Construct transform
+        gt_rotation = rotation / scale_factor
+        gt_translation = translation
 
-        # ======================================
-        # Apply inverse scale to rotation block of transform matrix
-        if scale_factor != 1.0:
-            transform[:3, :3] = transform[:3, :3] / scale_factor
+        transform = get_transform_from_rotation_translation(gt_rotation, gt_translation)
         # ======================================
 
         # get correspondences

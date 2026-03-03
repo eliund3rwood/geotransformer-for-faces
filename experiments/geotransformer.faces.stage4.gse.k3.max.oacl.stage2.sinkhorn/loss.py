@@ -245,8 +245,23 @@ class Evaluator(nn.Module):
         transform = data_dict['transform']
         est_transform = output_dict['estimated_transform']
         src_points = output_dict['src_points']
+        
+        # ==================================================
+        # Normalize the rotation blocks to remove scale
+        def normalize_transform(T):
+            T_norm = T.clone()
+            # Calculate scale as the norm of the first column of the 3x3 block
+            s = torch.norm(T[:3, 0]) 
+            T_norm[:3, :3] = T[:3, :3] / s
+            return T_norm, s
+        
+        gt_norm, gt_scale = normalize_transform(transform)
+        est_norm, est_scale = normalize_transform(est_transform)
+        rre, rte = isotropic_transform_error(gt_norm, est_norm)
 
-        rre, rte = isotropic_transform_error(transform, est_transform)
+        #===================================================
+
+        #rre, rte = isotropic_transform_error(transform, est_transform)
 
         realignment_transform = torch.matmul(torch.inverse(transform), est_transform)
         realigned_src_points_f = apply_transform(src_points, realignment_transform)
