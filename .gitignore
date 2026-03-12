@@ -1,11 +1,13 @@
+__pycache__/
+*.pyc
+
 # Ignore data directories
 data/
 scans/
 output/
 UHM_downsampled/
 UHM_generated_data/
-experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/viz_debug
-experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/__pycache__
+experiments/*/viz_debug
 # Ignore specific model files
 pca_basis_all.pth
 experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/pca_basis_all.pth
