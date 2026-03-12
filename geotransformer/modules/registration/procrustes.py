@@ -151,6 +151,24 @@ def weighted_umeyama(
             scale = scale.squeeze(0)
         return scale, R, t
     
+class WeightedUmeyama(nn.Module):
+    def __init__(self, weight_thresh=0.0, eps=1e-5, return_transform=False):
+        super(WeightedUmeyama, self).__init__()
+        self.weight_thresh = weight_thresh
+        self.eps = eps
+        self.return_transform = return_transform
+
+    def forward(self, src_points, tgt_points, weights=None):
+        return weighted_umeyama(
+            src_points,
+            tgt_points,
+            weights=weights,
+            weight_thresh=self.weight_thresh,
+            eps=self.eps,
+            return_transform=self.return_transform,
+        )
+
+
 class WeightedProcrustes(nn.Module):
     def __init__(self, weight_thresh=0.0, eps=1e-5, return_transform=False):
         super(WeightedProcrustes, self).__init__()
@@ -159,8 +177,7 @@ class WeightedProcrustes(nn.Module):
         self.return_transform = return_transform
 
     def forward(self, src_points, tgt_points, weights=None):
-        #return weighted_procrustes(
-        return weighted_umeyama(
+        return weighted_procrustes(
             src_points,
             tgt_points,
             weights=weights,

@@ -32,7 +32,7 @@ train-faces:
 
 train-faces-downsampled: 
 	docker run --rm -d --runtime nvidia \
-            --gpus all \
+            --gpus '"device=0"' \
             -h geotransformer \
 			-e CUDA_VISIBLE_DEVICES=0 \
 	    	-v "$(PWD)":/workspace/src \
@@ -41,3 +41,29 @@ train-faces-downsampled:
 			--name geotransformer-train \
 			--shm-size=64g \
 			geotransformer python trainval_downsampled.py
+
+
+train-faces-angles-embeddings: 
+	docker run --rm -d --runtime nvidia \
+            --gpus '"device=0"' \
+            -h geotransformer \
+			-e CUDA_VISIBLE_DEVICES=0 \
+	    	-v "$(PWD)":/workspace/src \
+			-v /data:/data \
+	    	-w=/workspace/src/experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn.anglesembed \
+			--name geotransformer-train-angles \
+			--shm-size=64g \
+			geotransformer python trainval_downsampled.py
+
+train-faces-tripletratio: 
+	docker run --rm -d --runtime nvidia \
+            --gpus '"device=0"' \
+            -h geotransformer \
+			-e CUDA_VISIBLE_DEVICES=0 \
+	    	-v "$(PWD)":/workspace/src \
+			-v /data:/data \
+	    	-w=/workspace/src/experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn.tripletratio \
+			--name geotransformer-train-triplet \
+			--shm-size=64g \
+			geotransformer python trainval_downsampled.py
+

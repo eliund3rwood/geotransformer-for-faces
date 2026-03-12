@@ -15,7 +15,7 @@ _C.seed = 7351
 # dirs
 _C.working_dir = osp.dirname(osp.realpath(__file__))
 _C.root_dir = osp.dirname(osp.dirname(_C.working_dir))
-_C.exp_name = osp.basename("geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn")
+_C.exp_name = osp.basename(_C.working_dir)
 _C.output_dir = osp.join(_C.root_dir, 'output', _C.exp_name)
 _C.snapshot_dir = osp.join(_C.output_dir, 'snapshots')
 _C.log_dir = osp.join(_C.output_dir, 'logs')
@@ -37,7 +37,7 @@ _C.data.dataset_root = osp.join(_C.root_dir, 'data', 'faces')
 # train data
 _C.train = edict()
 _C.train.batch_size = 1
-_C.train.num_workers = 12
+_C.train.num_workers = 8
 _C.train.point_limit = 30000
 _C.train.use_augmentation = True
 _C.train.augmentation_noise = 0.005
@@ -69,8 +69,7 @@ _C.optim = edict()
 _C.optim.lr = 1e-4
 _C.optim.lr_decay = 0.95
 _C.optim.lr_decay_steps = 1
-#_C.optim.weight_decay = 1e-6
-_C.optim.weight_decay = 0
+_C.optim.weight_decay = 1e-6
 _C.optim.max_epoch = 40
 _C.optim.grad_acc_steps = 1
 
@@ -96,9 +95,9 @@ _C.model.num_sinkhorn_iterations = 100
 
 # model - Coarse Matching
 _C.coarse_matching = edict()
-_C.coarse_matching.num_targets = 16
+_C.coarse_matching.num_targets = 128
 _C.coarse_matching.overlap_threshold = 0.1
-_C.coarse_matching.num_correspondences = 32
+_C.coarse_matching.num_correspondences = 256
 _C.coarse_matching.dual_normalization = True
 
 # model - GeoTransformer
@@ -124,7 +123,6 @@ _C.fine_matching.use_global_score = False
 _C.fine_matching.correspondence_threshold = 3
 _C.fine_matching.correspondence_limit = None
 _C.fine_matching.num_refinement_steps = 5
-_C.fine_matching.use_umeyama = True
 
 # loss - Coarse level
 _C.coarse_loss = edict()

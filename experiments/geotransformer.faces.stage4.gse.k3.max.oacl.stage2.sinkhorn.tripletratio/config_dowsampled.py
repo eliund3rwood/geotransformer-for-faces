@@ -15,7 +15,7 @@ _C.seed = 7351
 # dirs
 _C.working_dir = osp.dirname(osp.realpath(__file__))
 _C.root_dir = osp.dirname(osp.dirname(_C.working_dir))
-_C.exp_name = osp.basename("geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn")
+_C.exp_name = osp.basename("geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn.tripletratio")
 _C.output_dir = osp.join(_C.root_dir, 'output', _C.exp_name)
 _C.snapshot_dir = osp.join(_C.output_dir, 'snapshots')
 _C.log_dir = osp.join(_C.output_dir, 'logs')
@@ -125,6 +125,7 @@ _C.fine_matching.correspondence_threshold = 3
 _C.fine_matching.correspondence_limit = None
 _C.fine_matching.num_refinement_steps = 5
 _C.fine_matching.use_umeyama = True
+
 
 # loss - Coarse level
 _C.coarse_loss = edict()

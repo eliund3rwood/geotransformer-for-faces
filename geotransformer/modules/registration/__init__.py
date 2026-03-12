@@ -16,4 +16,4 @@ from geotransformer.modules.registration.metrics import (
     isotropic_transform_error,
     anisotropic_transform_error,
 )
-from geotransformer.modules.registration.procrustes import weighted_procrustes, WeightedProcrustes
+from geotransformer.modules.registration.procrustes import weighted_procrustes, WeightedProcrustes, weighted_umeyama, WeightedUmeyama

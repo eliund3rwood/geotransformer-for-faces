@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from geotransformer.modules.ops import apply_transform
-from geotransformer.modules.registration import WeightedProcrustes
+from geotransformer.modules.registration import WeightedProcrustes, WeightedUmeyama
 
 
 class LocalGlobalRegistration(nn.Module):
@@ -20,6 +20,7 @@ class LocalGlobalRegistration(nn.Module):
         correspondence_threshold: int = 3,
         correspondence_limit: Optional[int] = None,
         num_refinement_steps: int = 5,
+        use_umeyama: bool = False,
     ):
         r"""Point Matching with Local-to-Global Registration.
 
@@ -44,7 +45,10 @@ class LocalGlobalRegistration(nn.Module):
         self.correspondence_threshold = correspondence_threshold
         self.correspondence_limit = correspondence_limit
         self.num_refinement_steps = num_refinement_steps
-        self.procrustes = WeightedProcrustes(return_transform=True)
+        if use_umeyama:
+            self.procrustes = WeightedUmeyama(return_transform=True)
+        else:
+            self.procrustes = WeightedProcrustes(return_transform=True)
 
     def compute_correspondence_matrix(self, score_mat, ref_knn_masks, src_knn_masks):
         r"""Compute matching matrix and score matrix for each patch correspondence."""

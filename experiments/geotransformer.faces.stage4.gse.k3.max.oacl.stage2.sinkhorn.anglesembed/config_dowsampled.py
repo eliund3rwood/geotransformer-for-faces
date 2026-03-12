@@ -15,7 +15,7 @@ _C.seed = 7351
 # dirs
 _C.working_dir = osp.dirname(osp.realpath(__file__))
 _C.root_dir = osp.dirname(osp.dirname(_C.working_dir))
-_C.exp_name = osp.basename("geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn")
+_C.exp_name = osp.basename("geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn.anglesembed")
 _C.output_dir = osp.join(_C.root_dir, 'output', _C.exp_name)
 _C.snapshot_dir = osp.join(_C.output_dir, 'snapshots')
 _C.log_dir = osp.join(_C.output_dir, 'logs')

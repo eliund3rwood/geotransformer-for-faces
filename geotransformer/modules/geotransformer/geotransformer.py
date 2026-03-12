@@ -7,12 +7,13 @@ from geotransformer.modules.transformer import SinusoidalPositionalEmbedding, RP
 
 
 class GeometricStructureEmbedding(nn.Module):
-    def __init__(self, hidden_dim, sigma_d, sigma_a, angle_k, reduction_a='max'):
+    def __init__(self, hidden_dim, sigma_d, sigma_a, angle_k, reduction_a='max', only_angles=False):
         super(GeometricStructureEmbedding, self).__init__()
         self.sigma_d = sigma_d
         self.sigma_a = sigma_a
         self.factor_a = 180.0 / (self.sigma_a * np.pi)
         self.angle_k = angle_k
+        self.only_angles = only_angles
 
         self.embedding = SinusoidalPositionalEmbedding(hidden_dim)
         self.proj_d = nn.Linear(hidden_dim, hidden_dim)
@@ -57,8 +58,9 @@ class GeometricStructureEmbedding(nn.Module):
     def forward(self, points):
         d_indices, a_indices = self.get_embedding_indices(points)
 
-        d_embeddings = self.embedding(d_indices)
-        d_embeddings = self.proj_d(d_embeddings)
+        if not self.only_angles:
+            d_embeddings = self.embedding(d_indices)
+            d_embeddings = self.proj_d(d_embeddings)
 
         a_embeddings = self.embedding(a_indices)
         a_embeddings = self.proj_a(a_embeddings)
@@ -67,9 +69,55 @@ class GeometricStructureEmbedding(nn.Module):
         else:
             a_embeddings = a_embeddings.mean(dim=3)
 
-        embeddings = d_embeddings + a_embeddings
+        if not self.only_angles:
+            embeddings = d_embeddings + a_embeddings
+        else:
+            embeddings = a_embeddings
 
         return embeddings
+
+
+class TripletRatioGeometricStructureEmbedding(GeometricStructureEmbedding):
+    """Scale-invariant variant that replaces the absolute distance embedding with
+    an intra-triplet length ratio:  Ratio_{i,j,x} = ||p_i - p_j|| / ||p_i - p_x||
+    where x ranges over the k nearest neighbors of p_i.
+
+    sigma_d is unused; pass any value (defaults to 1.0 so d_indices == dist_map).
+    """
+
+    def __init__(self, hidden_dim, sigma_a, angle_k, reduction_a='max', reduction_r='max'):
+        super().__init__(hidden_dim, sigma_d=1.0, sigma_a=sigma_a, angle_k=angle_k, reduction_a=reduction_a)
+        if reduction_r not in ['max', 'mean']:
+            raise ValueError(f'Unsupported reduction mode: {reduction_r}.')
+        self.reduction_r = reduction_r
+
+    @torch.no_grad()
+    def get_embedding_indices(self, points):
+        # d_indices == dist_map because sigma_d=1.0
+        dist_map, a_indices = super().get_embedding_indices(points)
+        knn_indices = dist_map.topk(k=self.angle_k + 1, dim=2, largest=False)[1][:, :, 1:]  # (B, N, k)
+        knn_dists = dist_map.gather(2, knn_indices)                                           # (B, N, k)
+        r_indices = dist_map.unsqueeze(3) / (knn_dists.unsqueeze(2) + 1e-8)                  # (B, N, N, k)
+        return r_indices, a_indices
+
+    def forward(self, points):
+        r_indices, a_indices = self.get_embedding_indices(points)
+
+        r_embeddings = self.embedding(r_indices)
+        r_embeddings = self.proj_d(r_embeddings)
+        if self.reduction_r == 'max':
+            r_embeddings = r_embeddings.max(dim=3)[0]
+        else:
+            r_embeddings = r_embeddings.mean(dim=3)
+
+        a_embeddings = self.embedding(a_indices)
+        a_embeddings = self.proj_a(a_embeddings)
+        if self.reduction_a == 'max':
+            a_embeddings = a_embeddings.max(dim=3)[0]
+        else:
+            a_embeddings = a_embeddings.mean(dim=3)
+
+        return r_embeddings + a_embeddings
 
 
 class GeometricTransformer(nn.Module):
@@ -86,6 +134,8 @@ class GeometricTransformer(nn.Module):
         dropout=None,
         activation_fn='ReLU',
         reduction_a='max',
+        only_angles=False,
+        scale_invariant=False,
     ):
         r"""Geometric Transformer (GeoTransformer).
 
@@ -100,10 +150,15 @@ class GeometricTransformer(nn.Module):
             angle_k: number of nearest neighbors for angular embedding
             activation_fn: activation function
             reduction_a: reduction mode of angular embedding ['max', 'mean']
+            only_angles: whether to use only angular embedding
+            scale_invariant: if True, use triplet ratio embedding instead of absolute distances
         """
         super(GeometricTransformer, self).__init__()
 
-        self.embedding = GeometricStructureEmbedding(hidden_dim, sigma_d, sigma_a, angle_k, reduction_a=reduction_a)
+        if scale_invariant:
+            self.embedding = TripletRatioGeometricStructureEmbedding(hidden_dim, sigma_a, angle_k, reduction_a=reduction_a)
+        else:
+            self.embedding = GeometricStructureEmbedding(hidden_dim, sigma_d, sigma_a, angle_k, reduction_a=reduction_a, only_angles=only_angles)
 
         self.in_proj = nn.Linear(input_dim, hidden_dim)
         self.transformer = RPEConditionalTransformer(
