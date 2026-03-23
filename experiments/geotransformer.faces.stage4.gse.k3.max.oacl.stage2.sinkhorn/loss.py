@@ -192,14 +192,14 @@ class OverallLoss(nn.Module):
     def forward(self, output_dict, data_dict, epoch=None, iteration=None, mode='train'):
         coarse_loss = self.coarse_loss(output_dict)
         fine_loss = self.fine_loss(output_dict, data_dict)
-        morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
-        loss = self.weight_coarse_loss * coarse_loss + self.weight_fine_loss * fine_loss + self.weight_morph_loss * morph_loss
+        #morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
+        loss = self.weight_coarse_loss * coarse_loss + self.weight_fine_loss * fine_loss # + self.weight_morph_loss * morph_loss
 
         return {
             'loss': loss,
             'c_loss': coarse_loss,
             'f_loss': fine_loss,
-            'm_loss': morph_loss
+            #'m_loss': morph_loss
         }
 
 
