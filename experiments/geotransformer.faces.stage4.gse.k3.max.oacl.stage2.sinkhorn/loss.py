@@ -93,6 +93,7 @@ class MorphableLoss(nn.Module):
         if gt_points.dim() == 2:
             gt_points = gt_points.unsqueeze(0)
 
+        """
         # Visualization block
         recon_gt_points = output_dict['recon_gt_points']
 
@@ -163,7 +164,7 @@ class MorphableLoss(nn.Module):
                 plt.close(fig)
                 print(f"Saved visualization: {save_path}")
         # End visualization block
-
+        """
 
         # Chamfer Distance
         #loss_chamfer, _ = chamfer_distance(pred_points, gt_points)
@@ -192,14 +193,14 @@ class OverallLoss(nn.Module):
     def forward(self, output_dict, data_dict, epoch=None, iteration=None, mode='train'):
         coarse_loss = self.coarse_loss(output_dict)
         fine_loss = self.fine_loss(output_dict, data_dict)
-        #morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
-        loss = self.weight_coarse_loss * coarse_loss + self.weight_fine_loss * fine_loss # + self.weight_morph_loss * morph_loss
+        morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
+        loss = self.weight_coarse_loss * coarse_loss + self.weight_fine_loss * fine_loss + self.weight_morph_loss * morph_loss
 
         return {
             'loss': loss,
             'c_loss': coarse_loss,
             'f_loss': fine_loss,
-            #'m_loss': morph_loss
+            'm_loss': morph_loss
         }
 
 

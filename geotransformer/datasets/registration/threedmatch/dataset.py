@@ -3,7 +3,7 @@ import os.path as osp
 import pickle
 import random
 from typing import Dict
-
+from scipy.spatial import KDTree
 import numpy as np
 import torch
 import torch.utils.data
@@ -141,7 +141,7 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
 
         # ======================================
         scale_factor = 1.0
-        if self.use_augmentation:
+        if self.use_augmentation and self.subset!='val':
             # Subsampling
             if random.random() > 0.5:
                 num_points = src_points.shape[0]
@@ -149,10 +149,39 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
                 keep_points = int(num_points * keep_ratio)
                 indices = np.random.choice(num_points, keep_points, replace=False)
                 src_points = src_points[indices]
+
             # Scale Augmentation 
             if random.random() > 0.5:
                 scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
                 src_points = src_points * scale_factor
+
+        if self.use_augmentation and self.subset == 'val':
+            # Subsampling/Upsampling
+            num_points = src_points.shape[0]
+            ratio = self.aug_subsample_keep_min
+            target_count = int(ratio * num_points)
+
+            if ratio > 1.0:
+                num_to_interpolate = target_count - num_points
+
+                tree = KDTree(src_points)
+                indices = np.random.choice(num_points, num_to_interpolate)
+                base_points = src_points[indices]
+                distances, nn_indices = tree.query(base_points, k=2)
+                neighbor_points = src_points[nn_indices[:, 1]]
+                alphas = np.random.rand(num_to_interpolate, 1).astype(np.float32)
+                interpolated_points = base_points + alphas * (neighbor_points - base_points)
+                src_points = np.concatenate([src_points, interpolated_points], axis=0)
+                
+            elif ratio < 1.0:
+                indices = np.random.choice(num_points, target_count, replace=False)
+                src_points = src_points[indices]
+
+            # Scale Augmentation 
+            assert self.aug_scale_min == self.aug_scale_max, f"aug_scale_min ({self.aug_scale_min}) != aug_scale_max ({self.aug_scale_max})"
+            scale_factor = self.aug_scale_min
+            src_points = src_points * scale_factor
+
 
         # Construct transform
         gt_rotation = rotation / scale_factor
