@@ -121,6 +121,7 @@ class GeoTransformer(nn.Module):
             correspondence_threshold=cfg.fine_matching.correspondence_threshold,
             correspondence_limit=cfg.fine_matching.correspondence_limit,
             num_refinement_steps=cfg.fine_matching.num_refinement_steps,
+            use_umeyama=cfg.fine_matching.use_umeyama,
         )
 
         self.optimal_transport = LearnableLogOptimalTransport(cfg.model.num_sinkhorn_iterations)
