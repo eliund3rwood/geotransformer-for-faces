@@ -46,11 +46,12 @@ class Validator(EpochBasedTrainer):
 
 def main():
     cfg = make_cfg()
-    checkpoint_path = '../../output/with_aug/snapshots/epoch-40.pth.tar'
+    #checkpoint_path = '../../output/with_aug/snapshots/epoch-40.pth.tar'
+    checkpoint_path = '../../output/geotransformer.facesdownsampledfixed.stage4.gse.k3.max.oacl.stage2.sinkhorn/snapshots/epoch-31.pth.tar'
     scales = [0.5, 0.75, 1.0, 1.25, 1.5]
-    ratios = [1.1, 1.2, 1.3, 1.4, 1.5]
-    for ratio in ratios:
-        val = Validator(cfg, checkpoint_path, subsample=ratio)
+    #ratios = [1.1, 1.2, 1.3, 1.4, 1.5]
+    for scale in scales:
+        val = Validator(cfg, checkpoint_path, scale = scale)
         val.logger.info("Starting validation pass...")
         val.inference_epoch()
 

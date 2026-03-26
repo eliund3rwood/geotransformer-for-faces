@@ -49,14 +49,23 @@ _C.test.batch_size = 1
 _C.test.num_workers = 8
 _C.test.point_limit = None
 
-# evaluation
+# # evaluation
+# _C.eval = edict()
+# _C.eval.acceptance_overlap = 0.0
+# _C.eval.acceptance_radius = 0.04
+# _C.eval.inlier_ratio_threshold = 0.05
+# _C.eval.rmse_threshold = 0.05
+# _C.eval.rre_threshold = 15.0
+# _C.eval.rte_threshold = 0.05
+
+# original evaluation
 _C.eval = edict()
 _C.eval.acceptance_overlap = 0.0
-_C.eval.acceptance_radius = 0.04
+_C.eval.acceptance_radius = 0.1
 _C.eval.inlier_ratio_threshold = 0.05
-_C.eval.rmse_threshold = 0.05
+_C.eval.rmse_threshold = 0.2
 _C.eval.rre_threshold = 15.0
-_C.eval.rte_threshold = 0.05
+_C.eval.rte_threshold = 0.3
 
 # ransac
 _C.ransac = edict()

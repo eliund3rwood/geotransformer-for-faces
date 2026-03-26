@@ -70,6 +70,42 @@ class Trainer(EpochBasedTrainer):
         loss_dict.update(result_dict)
         return output_dict, loss_dict
 
+    def val_epoch(self):
+        """
+        Overriding val_epoch to perform two separate testing passes:
+        1. Varying ratios (subsample) while scale is 1.0.
+        2. Varying scales while ratio (subsample) is 1.0.
+        """
+        # Save original loader
+        original_val_loader = self.val_loader
+
+        # Test Set 1: Ratios [0.5, 0.75, 1.0] with Scale 1.0
+        test_ratios = [0.5, 0.75, 1.0]
+        for ratio in test_ratios:
+            self.logger.info(f"--- Val Pass | Subsample (Ratio): {ratio}, Scale: 1.0 ---")
+            
+            _, temp_val_loader, _ = train_valid_data_loader(
+                self.cfg, self.distributed, scale=1.0, subsample=ratio
+            )
+            
+            self.val_loader = temp_val_loader
+            super().val_epoch()
+
+        # Test Set 2: Scales [0.6, 0.8, 1.2, 1.4] with Ratio 1.0
+        test_scales = [0.6, 0.8, 1.2, 1.4]
+        for scale in test_scales:
+            self.logger.info(f"--- Val Pass | Subsample (Ratio): 1.0, Scale: {scale} ---")
+            
+            _, temp_val_loader, _ = train_valid_data_loader(
+                self.cfg, self.distributed, scale=scale, subsample=1.0
+            )
+            
+            self.val_loader = temp_val_loader
+            super().val_epoch()
+
+        # Restore the original validation loader for engine consistency
+        self.val_loader = original_val_loader
+
 
 def main():
     cfg = make_cfg()
