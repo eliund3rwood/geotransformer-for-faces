@@ -52,11 +52,11 @@ _C.test.point_limit = None
 # evaluation
 _C.eval = edict()
 _C.eval.acceptance_overlap = 0.0
-_C.eval.acceptance_radius = 0.1
+_C.eval.acceptance_radius = 0.04
 _C.eval.inlier_ratio_threshold = 0.05
-_C.eval.rmse_threshold = 0.2
+_C.eval.rmse_threshold = 0.05
 _C.eval.rre_threshold = 15.0
-_C.eval.rte_threshold = 0.3
+_C.eval.rte_threshold = 0.05
 
 # ransac
 _C.ransac = edict()
@@ -77,11 +77,11 @@ _C.optim.grad_acc_steps = 1
 # model - backbone
 _C.backbone = edict()
 _C.backbone.num_stages = 4
-_C.backbone.init_voxel_size = 0.02
+_C.backbone.init_voxel_size = 0.04 # v_ref
 _C.backbone.kernel_size = 15
-_C.backbone.base_radius = 2.5
+_C.backbone.base_radius = 3.125 
 _C.backbone.base_sigma = 2.0
-_C.backbone.init_radius = _C.backbone.base_radius * _C.backbone.init_voxel_size
+_C.backbone.init_radius = _C.backbone.base_radius * _C.backbone.init_voxel_size # 3.125 * 0.04 = 0.125
 _C.backbone.init_sigma = _C.backbone.base_sigma * _C.backbone.init_voxel_size
 _C.backbone.group_norm = 32
 _C.backbone.input_dim = 1
@@ -90,7 +90,7 @@ _C.backbone.output_dim = 256
 
 # model - Global
 _C.model = edict()
-_C.model.ground_truth_matching_radius = 0.05
+_C.model.ground_truth_matching_radius = 0.06 
 _C.model.num_points_in_patch = 64
 _C.model.num_sinkhorn_iterations = 100
 
@@ -108,7 +108,7 @@ _C.geotransformer.hidden_dim = 256
 _C.geotransformer.output_dim = 256
 _C.geotransformer.num_heads = 4
 _C.geotransformer.blocks = ['self', 'cross', 'self', 'cross', 'self', 'cross']
-_C.geotransformer.sigma_d = 0.2
+_C.geotransformer.sigma_d = 0.04 # v_ref
 _C.geotransformer.sigma_a = 15
 _C.geotransformer.angle_k = 3
 _C.geotransformer.reduction_a = 'max'
@@ -116,7 +116,7 @@ _C.geotransformer.reduction_a = 'max'
 # model - Fine Matching
 _C.fine_matching = edict()
 _C.fine_matching.topk = 3
-_C.fine_matching.acceptance_radius = 0.1
+_C.fine_matching.acceptance_radius = 0.1 # left unchanged, might need to modify 
 _C.fine_matching.mutual = True
 _C.fine_matching.confidence_threshold = 0.05
 _C.fine_matching.use_dustbin = False
@@ -136,7 +136,7 @@ _C.coarse_loss.positive_overlap = 0.1
 
 # loss - Fine level
 _C.fine_loss = edict()
-_C.fine_loss.positive_radius = 0.05
+_C.fine_loss.positive_radius = 0.08 # changed to be 2 * voxel_size
 
 # loss - Overall
 _C.loss = edict()

@@ -15,9 +15,9 @@ def train_valid_data_loader(cfg, distributed, val_aug_scale=1.0, val_aug_subsamp
         augmentation_noise=cfg.train.augmentation_noise,
         augmentation_rotation=cfg.train.augmentation_rotation,
         # ======================================
-        aug_scale_min=0.7,
-        aug_scale_max=1.3,
-        aug_subsample_keep_min= 0.7,
+        aug_scale_min=0.5,
+        aug_scale_max=1.5,
+        aug_subsample_keep_min= 0.5,
         # ======================================
     )
     neighbor_limits = calibrate_neighbors_stack_mode(
@@ -44,14 +44,15 @@ def train_valid_data_loader(cfg, distributed, val_aug_scale=1.0, val_aug_subsamp
         cfg.data.dataset_root,
         'val',
         point_limit=cfg.test.point_limit,
-        use_augmentation=True,
-        augmentation_noise=cfg.train.augmentation_noise,
-        augmentation_rotation=cfg.train.augmentation_rotation,
-        # ======================================
-        aug_scale_min= val_aug_scale,
-        aug_scale_max= val_aug_scale,
-        aug_subsample_keep_min= val_aug_subsample,
-        # ======================================
+        use_augmentation=False,
+        # use_augmentation=True,
+        # augmentation_noise=cfg.train.augmentation_noise,
+        # augmentation_rotation=cfg.train.augmentation_rotation,
+        # # ======================================
+        # aug_scale_min= val_aug_scale,
+        # aug_scale_max= val_aug_scale,
+        # aug_subsample_keep_min= val_aug_subsample,
+        # # ======================================
     )
     valid_loader = build_dataloader_stack_mode(
         valid_dataset,
@@ -77,11 +78,7 @@ def test_data_loader(cfg, benchmark):
         use_augmentation=cfg.train.use_augmentation,
         augmentation_noise=cfg.train.augmentation_noise,
         augmentation_rotation=cfg.train.augmentation_rotation,
-        # ======================================
-        aug_scale_min=0.7,
-        aug_scale_max=1.3,
-        aug_subsample_keep_min= 0.7,
-        # ======================================
+     
     )
     neighbor_limits = calibrate_neighbors_stack_mode(
         train_dataset,

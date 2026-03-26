@@ -15,6 +15,7 @@ from geotransformer.modules.geotransformer import (
 
 from backbone import KPConvFPN
 
+
 class CrossAttentionRegressor(nn.Module):
     def __init__(self, feature_dim=256, num_patches=32, num_coeffs=100, nhead=4, num_layers=2):
         super().__init__()
@@ -60,6 +61,10 @@ class GeoTransformer(nn.Module):
         super(GeoTransformer, self).__init__()
         self.num_points_in_patch = cfg.model.num_points_in_patch
         self.matching_radius = cfg.model.ground_truth_matching_radius
+
+        self.num_stages = cfg.backbone.num_stages
+        self.init_radius = cfg.backbone.init_radius
+        self.init_voxel_size = cfg.backbone.init_voxel_size
 
         pca_data = torch.load("pca_basis_all.pth")
 
@@ -204,14 +209,37 @@ class GeoTransformer(nn.Module):
 
         # Construct new input for second pass
         new_points = torch.cat([new_ref_points_detached, src_points], dim=0)
-        new_lengths = torch.tensor([len(new_ref_points_detached), len(src_points)], dtype=torch.int32)
+        new_lengths = torch.tensor([len(new_ref_points_detached), len(src_points)], dtype=torch.long)
 
         data_dict['points'][0] = new_points
-        data_dict['lengths'][0] = new_lengths
+        data_dict['lengths'][0] = new_lengths.to(new_points.device)
 
         orig_feat_dim = data_dict['features'].shape[1]
         new_ref_feats = torch.ones((len(new_ref_points), orig_feat_dim), device=orig_points.device)
         data_dict['features'] = torch.cat([new_ref_feats, src_feats_raw], dim=0)
+
+        #--------------------------------------------
+        from geotransformer.utils.data import precompute_data_stack_mode
+        neighbor_limits = [n.shape[1] for n in data_dict['neighbors']]
+        new_hierarchy = precompute_data_stack_mode(
+            data_dict['points'][0], 
+            data_dict['lengths'][0], 
+            self.backbone.num_stages if hasattr(self.backbone, 'num_stages') else 4, 
+            self.init_voxel_size, 
+            self.init_radius, 
+            neighbor_limits
+        )
+
+        device = src_feats_raw.device
+        for key in ['points', 'lengths', 'neighbors', 'subsampling', 'upsampling']:
+            if isinstance(new_hierarchy[key], list):
+                new_hierarchy[key] = [x.to(device) for x in new_hierarchy[key]]
+            else:
+                new_hierarchy[key] = new_hierarchy[key].to(device)
+        
+        data_dict.update(new_hierarchy)
+
+        #--------------------------------------------
 
         feats_list_new = self.backbone(data_dict['features'], data_dict)
 
@@ -254,12 +282,22 @@ class GeoTransformer(nn.Module):
 
         transform = data_dict['transform'].detach()
 
+        #----------------------------
+        # Normalize GT transform for correspondences
+        r_ref = data_dict['r_ref']
+        r_src = data_dict['r_src']
+
+        normalized_transform = transform.clone()
+        normalized_transform[:3, :3] *= (r_src / r_ref)
+        #----------------------------
+
         gt_node_corr_indices, gt_node_corr_overlaps = get_node_correspondences(
             ref_points_c,
             src_points_c,
             ref_node_knn_points,
             src_node_knn_points,
-            transform,
+            #transform,
+            normalized_transform,
             self.matching_radius,
             ref_masks=ref_node_masks,
             src_masks=src_node_masks,

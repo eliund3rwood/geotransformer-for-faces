@@ -56,7 +56,18 @@ class FineMatchingLoss(nn.Module):
         matching_scores = output_dict['matching_scores']
         transform = data_dict['transform']
 
-        src_node_corr_knn_points = apply_transform(src_node_corr_knn_points, transform)
+        #----------------------------
+        r_ref = data_dict['r_ref']
+        r_src = data_dict['r_src']
+
+        normalized_gt = transform.clone()
+        normalized_gt[:3, :3] *= (r_src / r_ref)
+
+        src_node_corr_knn_points = apply_transform(src_node_corr_knn_points, normalized_gt)
+        #----------------------------
+
+
+        #src_node_corr_knn_points = apply_transform(src_node_corr_knn_points, transform)
         dists = pairwise_distance(ref_node_corr_knn_points, src_node_corr_knn_points)  # (B, N, M)
         gt_masks = torch.logical_and(ref_node_corr_knn_masks.unsqueeze(2), src_node_corr_knn_masks.unsqueeze(1))
         gt_corr_map = torch.lt(dists, self.positive_radius ** 2)
@@ -93,7 +104,7 @@ class MorphableLoss(nn.Module):
         if gt_points.dim() == 2:
             gt_points = gt_points.unsqueeze(0)
 
-        """
+      
         # Visualization block
         recon_gt_points = output_dict['recon_gt_points']
 
@@ -164,7 +175,7 @@ class MorphableLoss(nn.Module):
                 plt.close(fig)
                 print(f"Saved visualization: {save_path}")
         # End visualization block
-        """
+   
 
         # Chamfer Distance
         #loss_chamfer, _ = chamfer_distance(pred_points, gt_points)
@@ -246,6 +257,7 @@ class Evaluator(nn.Module):
         transform = data_dict['transform']
         est_transform = output_dict['estimated_transform']
         src_points = output_dict['src_points']
+
         
         # ==================================================
         # Normalize the rotation blocks to remove scale

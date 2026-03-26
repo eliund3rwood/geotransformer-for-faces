@@ -143,17 +143,15 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         scale_factor = 1.0
         if self.use_augmentation and self.subset!='val':
             # Subsampling
-            if random.random() > 0.5:
-                num_points = src_points.shape[0]
-                keep_ratio = random.uniform(self.aug_subsample_keep_min, 1.0)
-                keep_points = int(num_points * keep_ratio)
-                indices = np.random.choice(num_points, keep_points, replace=False)
-                src_points = src_points[indices]
+            num_points = src_points.shape[0]
+            keep_ratio = random.uniform(self.aug_subsample_keep_min, 1.0)
+            keep_points = int(num_points * keep_ratio)
+            indices = np.random.choice(num_points, keep_points, replace=False)
+            src_points = src_points[indices]
 
             # Scale Augmentation 
-            if random.random() > 0.5:
-                scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
-                src_points = src_points * scale_factor
+            scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
+            src_points = src_points * scale_factor
 
         if self.use_augmentation and self.subset == 'val':
             # Subsampling/Upsampling

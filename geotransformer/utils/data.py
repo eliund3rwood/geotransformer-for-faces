@@ -2,15 +2,83 @@ from functools import partial
 
 import numpy as np
 import torch
-
+from sklearn.decomposition import PCA
 from geotransformer.modules.ops import grid_subsample, radius_search
 from geotransformer.utils.torch import build_dataloader
 
+TEMPLATE_CACHE = {
+    'r_ref': None,
+    'v_anchor': None
+}
+
+# BUFFER-X helpers
+
+def bufferx_radius(pts, target_pct=5.0):
+    """Calculates density-aware radius using torch"""
+    # pts: [N, 3] torch.Tensor
+    N = pts.shape[0]
+    num_kpts = min(N, 1000)
+    
+    # Randomly sample query points
+    indices = torch.randperm(N, device=pts.device)[:num_kpts]
+    kpts = pts[indices]
+    
+    # Compute squared distances [num_kpts, N]
+    dist_sqr = torch.cdist(kpts, pts).pow(2)
+    
+    low, high = 0.0, 500.0 
+    for _ in range(40):
+        r = (low + high) / 2.0
+        # Average percentage of points found within radius r
+        avg_pct = (dist_sqr < r**2).float().mean() * 100
+        
+        if avg_pct < target_pct:
+            low = r
+        else:
+            high = r
+    return float(r)
+
+def bufferx_voxel(pts):
+    """Determines adaptive voxel size using torch PCA """
+    # pts: [N, 3] torch.Tensor
+    N = pts.shape[0]
+    
+    # Center the points
+    pts_mean = pts.mean(dim=0)
+    centered_pts = pts - pts_mean
+    
+    # Sample subset for Covariance calculation (efficient PCA) 
+    num_samples = min(N, 2000)
+    indices = torch.randperm(N, device=pts.device)[:num_samples]
+    sampled = centered_pts[indices]
+    
+    # Compute Covariance Matrix
+    cov = torch.mm(sampled.t(), sampled) / (num_samples - 1)
+    
+    # Eigen Decomposition (ascending order: evals[0] is lambda_3) 
+    evals, evecs = torch.linalg.eigh(cov)
+    
+    # Sphericity (lambda_3 / lambda_1)
+    sphericity = evals[0] / evals[2]
+    
+    # Spread along the smallest eigenvector v_3 
+    v3 = evecs[:, 0]
+    proj = torch.mv(pts, v3)
+    z_range = proj.max() - proj.min()
+    
+    # Adaptive coefficient
+    alpha = 1.0 if sphericity < 0.05 else 1.5
+    v = (torch.sqrt(z_range) / 100.0) * alpha
+    
+    return float(torch.clamp(v, min=0.001))
 
 # Stack mode utilities
 
 
 def precompute_data_stack_mode(points, lengths, num_stages, voxel_size, radius, neighbor_limits):
+
+    points = points.cpu()
+    lengths = lengths.cpu()
 
     fixed_indices = torch.tensor([75, 411, 2699, 911, 8594, 3380, 6731, 9710, 9633, 119, 
                                   3441, 6319, 9541, 8732, 6162, 3774, 8296, 3151, 10, 
@@ -42,10 +110,6 @@ def precompute_data_stack_mode(points, lengths, num_stages, voxel_size, radius, 
     )
     points_list[-1] = new_coarse_points
     lengths_list[-1][0] = torch.tensor([fixed_indices.numel()], dtype=lengths.dtype, device=lengths.device)
-
-    for idx in range(len(points_list)):
-        points_list[idx] = points_list[idx].to(torch.device("cpu"), dtype=torch.float32).contiguous()
-        lengths_list[idx] = lengths_list[idx].to(torch.device("cpu"), dtype=torch.long)
 
     # radius search
     for i in range(num_stages):
@@ -178,6 +242,26 @@ def registration_collate_fn_stack_mode(
         collated_dict (Dict)
     """
     batch_size = len(data_dicts)
+
+    # Apply 'Geometric Bootstrapping' per sample
+    for data_dict in data_dicts:
+        ref_pts = torch.from_numpy(data_dict['ref_points']).float()
+        src_pts = torch.from_numpy(data_dict['src_points']).float()
+
+        if TEMPLATE_CACHE['r_ref'] is None:
+            TEMPLATE_CACHE['r_ref'] = bufferx_radius(ref_pts)
+        
+        r_ref = TEMPLATE_CACHE['r_ref']
+        r_src = bufferx_radius(src_pts)
+
+        # Scale src to match ref's scale
+        data_dict['ref_points'] = ref_pts 
+        data_dict['src_points'] = src_pts * (r_ref / r_src)
+        
+        # Save metadata 
+        data_dict['r_ref'] = torch.tensor(r_ref)
+        data_dict['r_src'] = torch.tensor(r_src)
+
     # merge data with the same key from different samples into a list
     collated_dict = {}
     for data_dict in data_dicts:
