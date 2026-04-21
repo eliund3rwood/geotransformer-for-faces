@@ -35,6 +35,10 @@ class CoarseMatchingLoss(nn.Module):
         overlaps = torch.zeros_like(feat_dists)
         overlaps[gt_ref_node_corr_indices, gt_src_node_corr_indices] = gt_node_corr_overlaps
         pos_masks = torch.gt(overlaps, self.positive_overlap)
+
+        if pos_masks.sum() == 0:
+            return torch.tensor(0.0, device=ref_feats.device, requires_grad=True)
+        
         neg_masks = torch.eq(overlaps, 0)
         pos_scales = torch.sqrt(overlaps * pos_masks.float())
 
@@ -69,7 +73,13 @@ class FineMatchingLoss(nn.Module):
         labels[:, :-1, -1] = slack_row_labels
         labels[:, -1, :-1] = slack_col_labels
 
-        loss = -matching_scores[labels].mean()
+
+        valid_matches = matching_scores[labels]
+        if valid_matches.numel() > 0:
+            loss = -valid_matches.mean()
+        else:
+            # Return 0.0 as a tensor so gradients can still flow from other losses
+            loss = torch.tensor(0.0, device=matching_scores.device, requires_grad=True)
 
         return loss
     
@@ -96,73 +106,73 @@ class MorphableLoss(nn.Module):
         # Visualization block
         recon_gt_points = output_dict['recon_gt_points']
 
-        do_viz = False
-        if iteration is not None:
-            if mode == 'train' and iteration in [10, 20, 30, 40, 50, 1010, 1020, 1030, 1040, 1050]:
-                do_viz = True
-            elif mode == 'val' and iteration in [5, 15, 25, 35, 45]:
-                do_viz = True
+        # do_viz = False
+        # if iteration is not None:
+        #     if mode == 'train' and iteration in [10, 20, 30, 40, 50, 1010, 1020, 1030, 1040, 1050]:
+        #         do_viz = True
+        #     elif mode == 'val' and iteration in [5, 15, 25, 35, 45]:
+        #         do_viz = True
 
-        if do_viz:
-            import os
-            import numpy as np
-            import matplotlib
-            matplotlib.set_loglevel('warning')
-            import matplotlib.pyplot as plt
+        # if do_viz:
+        #     import os
+        #     import numpy as np
+        #     import matplotlib
+        #     matplotlib.set_loglevel('warning')
+        #     import matplotlib.pyplot as plt
 
-            from datetime import datetime
+        #     from datetime import datetime
 
-            # Save directory
-            viz_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'viz_debug')
-            os.makedirs(viz_dir, exist_ok=True)
+        #     # Save directory
+        #     viz_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'viz_debug')
+        #     os.makedirs(viz_dir, exist_ok=True)
 
-            file_name_base = f"viz_{mode}_epoch_{epoch:04d}" if epoch is not None else f"viz_{mode}_debug"
+        #     file_name_base = f"viz_{mode}_epoch_{epoch:04d}" if epoch is not None else f"viz_{mode}_debug"
 
-            # Convert to numpy (Assuming shape [N, 3] based on our previous discussion)
-            pred_np = pred_points.detach().cpu().numpy().squeeze()
-            recon_gt_np = recon_gt_points.detach().cpu().numpy().squeeze()
-            gt_np = gt_points.detach().cpu().numpy().squeeze()
+        #     # Convert to numpy (Assuming shape [N, 3] based on our previous discussion)
+        #     pred_np = pred_points.detach().cpu().numpy().squeeze()
+        #     recon_gt_np = recon_gt_points.detach().cpu().numpy().squeeze()
+        #     gt_np = gt_points.detach().cpu().numpy().squeeze()
 
-            if pred_np.ndim == 1:
-                pred_np = pred_np[np.newaxis, :]
+        #     if pred_np.ndim == 1:
+        #         pred_np = pred_np[np.newaxis, :]
 
-            views = [("front", 0, 0)]
+        #     views = [("front", 0, 0)]
 
-            for name, elev, azim in views:
-                # Widen the figure to accommodate 3 plots
-                fig = plt.figure(figsize=(18, 6))
+        #     for name, elev, azim in views:
+        #         # Widen the figure to accommodate 3 plots
+        #         fig = plt.figure(figsize=(18, 6))
 
-                # Plot 1: Prediction (from pred_z)
-                ax1 = fig.add_subplot(131, projection='3d')
-                ax1.scatter(pred_np[:, 0], pred_np[:, 1], pred_np[:, 2], c='r', s=1)
-                ax1.set_title(f"Prediction (pred_z) ({name})")
-                ax1.view_init(elev=elev, azim=azim)
+        #         # Plot 1: Prediction (from pred_z)
+        #         ax1 = fig.add_subplot(131, projection='3d')
+        #         ax1.scatter(pred_np[:, 0], pred_np[:, 1], pred_np[:, 2], c='r', s=1)
+        #         ax1.set_title(f"Prediction (pred_z) ({name})")
+        #         ax1.view_init(elev=elev, azim=azim)
 
-                # Plot 2: Reconstruction from GT Z (New)
-                ax2 = fig.add_subplot(132, projection='3d')
-                ax2.scatter(recon_gt_np[:, 0], recon_gt_np[:, 1], recon_gt_np[:, 2], c='g', s=1)
-                ax2.set_title(f"Reconstruction (gt_z) ({name})")
-                ax2.view_init(elev=elev, azim=azim)
+        #         # Plot 2: Reconstruction from GT Z (New)
+        #         ax2 = fig.add_subplot(132, projection='3d')
+        #         ax2.scatter(recon_gt_np[:, 0], recon_gt_np[:, 1], recon_gt_np[:, 2], c='g', s=1)
+        #         ax2.set_title(f"Reconstruction (gt_z) ({name})")
+        #         ax2.view_init(elev=elev, azim=azim)
 
-                # Plot 3: Original Ground Truth Point Cloud
-                ax3 = fig.add_subplot(133, projection='3d')
-                ax3.scatter(gt_np[:, 0], gt_np[:, 1], gt_np[:, 2], c='b', s=1)
-                ax3.set_title(f"Ground Truth Point Cloud ({name})")
-                ax3.view_init(elev=elev, azim=azim)
+        #         # Plot 3: Original Ground Truth Point Cloud
+        #         ax3 = fig.add_subplot(133, projection='3d')
+        #         ax3.scatter(gt_np[:, 0], gt_np[:, 1], gt_np[:, 2], c='b', s=1)
+        #         ax3.set_title(f"Ground Truth Point Cloud ({name})")
+        #         ax3.view_init(elev=elev, azim=azim)
 
-                timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-                candidate = os.path.join(viz_dir, f"{file_name_base}_it{iteration:06d}_{timestamp}_{name}.png")
+        #         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        #         candidate = os.path.join(viz_dir, f"{file_name_base}_it{iteration:06d}_{timestamp}_{name}.png")
 
-                suffix = 0
-                save_path = candidate
-                while os.path.exists(save_path):
-                    suffix += 1
-                    save_path = candidate.replace(".png", f"_{suffix:02d}.png")
+        #         suffix = 0
+        #         save_path = candidate
+        #         while os.path.exists(save_path):
+        #             suffix += 1
+        #             save_path = candidate.replace(".png", f"_{suffix:02d}.png")
 
-                plt.savefig(save_path, bbox_inches='tight', dpi=150)
-                plt.close(fig)
-                print(f"Saved visualization: {save_path}")
-        # End visualization block
+        #         plt.savefig(save_path, bbox_inches='tight', dpi=150)
+        #         plt.close(fig)
+        #         print(f"Saved visualization: {save_path}")
+        # # End visualization block
 
 
         # Chamfer Distance
@@ -171,10 +181,22 @@ class MorphableLoss(nn.Module):
         # MSE
         #loss_mae = self.mae_loss(pred_points, gt_points)
 
-        MSE = F.mse_loss(pred_z, gt_z)
+        # Supervise the predicted coeffs against the ground truth coeffs
+        loss_z = F.mse_loss(pred_z, gt_z)
+        
+        return loss_z
 
-        return MSE
-    
+class ScaleLoss(nn.Module):
+    def __init__(self, cfg):
+        super(ScaleLoss, self).__init__()
+
+    def forward(self, output_dict, data_dict):
+        # Supervise the predicted scale against the ground truth augmentation scale
+        pred_scale = output_dict['pred_scale']
+        gt_scale = data_dict['gt_scale']
+        loss_scale = F.l1_loss(pred_scale, gt_scale)
+        
+        return loss_scale    
 
 
 
@@ -184,22 +206,47 @@ class OverallLoss(nn.Module):
         self.coarse_loss = CoarseMatchingLoss(cfg)
         self.fine_loss = FineMatchingLoss(cfg)
         self.morph_loss = MorphableLoss(cfg)
+        self.scale_loss = ScaleLoss(cfg) # Register new loss
 
-        self.weight_coarse_loss = 1.0 #cfg.loss.weight_coarse_loss
-        self.weight_fine_loss = 1.0 #cfg.loss.weight_fine_loss
-        self.weight_morph_loss = 1.0   # update as needed 
+        self.weight_coarse_loss = cfg.loss.weight_coarse_loss
+        self.weight_fine_loss = cfg.loss.weight_fine_loss
+        self.weight_morph_loss = 1.0
+        self.weight_scale_loss = 1.0
 
     def forward(self, output_dict, data_dict, epoch=None, iteration=None, mode='train'):
-        coarse_loss = self.coarse_loss(output_dict)
-        fine_loss = self.fine_loss(output_dict, data_dict)
+        # 1. Base losses (always active)
         morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
-        loss = self.weight_coarse_loss * coarse_loss + self.weight_fine_loss * fine_loss + self.weight_morph_loss * morph_loss
+        scale_loss = self.scale_loss(output_dict, data_dict)
+
+        # Initialize matching losses to 0
+        coarse_loss = torch.tensor(0.0).cuda()
+        fine_loss = torch.tensor(0.0).cuda()
+
+        # 2. Curriculum Learning Schedule
+        if mode == 'train' and epoch is not None:
+            # Stage 1: Epochs 1-2 (Warmup Morph/Scale only)
+            # Both coarse and fine remain 0.0
+            
+            # Stage 2: Full Training
+            if epoch > 2:
+                coarse_loss = self.coarse_loss(output_dict)
+                fine_loss = self.fine_loss(output_dict, data_dict)
+        else:
+            # During validation/testing, we want to calculate all losses to track metrics
+            coarse_loss = self.coarse_loss(output_dict)
+            fine_loss = self.fine_loss(output_dict, data_dict)
+
+        loss = (self.weight_coarse_loss * coarse_loss + 
+                self.weight_fine_loss * fine_loss + 
+                self.weight_morph_loss * morph_loss + 
+                self.weight_scale_loss * scale_loss)
 
         return {
             'loss': loss,
             'c_loss': coarse_loss,
             'f_loss': fine_loss,
-            'm_loss': morph_loss
+            'm_loss': morph_loss,
+            's_loss': scale_loss 
         }
 
 

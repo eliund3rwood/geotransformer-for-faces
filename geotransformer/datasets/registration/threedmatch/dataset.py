@@ -3,7 +3,7 @@ import os.path as osp
 import pickle
 import random
 from typing import Dict
-
+from scipy.spatial import KDTree
 import numpy as np
 import torch
 import torch.utils.data
@@ -27,8 +27,8 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         augmentation_rotation=1,
 
         # ======================================
-        aug_scale_min=0.7,
-        aug_scale_max=1.3,
+        aug_scale_min=0.5,
+        aug_scale_max=1.5,
         aug_subsample_keep_min=0.7,
         # ======================================
 
@@ -141,31 +141,59 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
 
         # ======================================
         scale_factor = 1.0
-        if self.use_augmentation:
+        if self.use_augmentation and self.subset!='val':
             # Subsampling
-            if random.random() > 0.5:
-                num_points = src_points.shape[0]
-                keep_ratio = random.uniform(self.aug_subsample_keep_min, 1.0)
-                keep_points = int(num_points * keep_ratio)
-                indices = np.random.choice(num_points, keep_points, replace=False)
+            num_points = src_points.shape[0]
+            keep_ratio = random.uniform(self.aug_subsample_keep_min, 1.0)
+            keep_points = int(num_points * keep_ratio)
+            indices = np.random.choice(num_points, keep_points, replace=False)
+            src_points = src_points[indices]
+
+            # Scale Augmentation (log-uniform so ×2 and ÷2 are equally likely)
+            log_scale = random.uniform(np.log(self.aug_scale_min), np.log(self.aug_scale_max))
+            scale_factor = np.exp(log_scale)
+            src_points = src_points * scale_factor
+
+        if self.use_augmentation and self.subset == 'val':
+            # Subsampling/Upsampling
+            num_points = src_points.shape[0]
+            ratio = self.aug_subsample_keep_min
+            target_count = int(ratio * num_points)
+
+            if ratio > 1.0:
+                num_to_interpolate = target_count - num_points
+
+                tree = KDTree(src_points)
+                indices = np.random.choice(num_points, num_to_interpolate)
+                base_points = src_points[indices]
+                distances, nn_indices = tree.query(base_points, k=2)
+                neighbor_points = src_points[nn_indices[:, 1]]
+                alphas = np.random.rand(num_to_interpolate, 1).astype(np.float32)
+                interpolated_points = base_points + alphas * (neighbor_points - base_points)
+                src_points = np.concatenate([src_points, interpolated_points], axis=0)
+                
+            elif ratio < 1.0:
+                indices = np.random.choice(num_points, target_count, replace=False)
                 src_points = src_points[indices]
+
             # Scale Augmentation 
-            if random.random() > 0.5:
-                scale_factor = random.uniform(self.aug_scale_min, self.aug_scale_max)
-                src_points = src_points * scale_factor
-        # ======================================
+            assert self.aug_scale_min == self.aug_scale_max, f"aug_scale_min ({self.aug_scale_min}) != aug_scale_max ({self.aug_scale_max})"
+            scale_factor = self.aug_scale_min
+            src_points = src_points * scale_factor
 
-        transform = get_transform_from_rotation_translation(rotation, translation)
+        data_dict['gt_scale'] = torch.tensor(scale_factor, dtype=torch.float32)
 
-        # ======================================
-        # Apply inverse scale to rotation block of transform matrix
-        if scale_factor != 1.0:
-            transform[:3, :3] = transform[:3, :3] / scale_factor
+        # Construct transform
+        gt_rotation = rotation 
+        gt_translation = translation
+
+        transform = get_transform_from_rotation_translation(gt_rotation, gt_translation)
         # ======================================
 
         # get correspondences
         if self.return_corr_indices:
-            corr_indices = get_correspondences(ref_points, src_points, transform, self.matching_radius)
+            unscaled_src_points = src_points / scale_factor
+            corr_indices = get_correspondences(ref_points, unscaled_src_points, transform, self.matching_radius)
             data_dict['corr_indices'] = corr_indices
 
         data_dict['ref_points'] = ref_points.astype(np.float32)

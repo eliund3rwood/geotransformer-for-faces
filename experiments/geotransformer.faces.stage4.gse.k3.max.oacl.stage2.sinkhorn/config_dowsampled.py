@@ -40,7 +40,7 @@ _C.train.batch_size = 1
 _C.train.num_workers = 12
 _C.train.point_limit = 30000
 _C.train.use_augmentation = True
-_C.train.augmentation_noise = 0.005
+_C.train.augmentation_noise = 0.01
 _C.train.augmentation_rotation = 1.0
 
 # test data
@@ -67,43 +67,43 @@ _C.ransac.num_iterations = 1000
 # optim
 _C.optim = edict()
 _C.optim.lr = 1e-4
-_C.optim.lr_decay = 0.95
-_C.optim.lr_decay_steps = 1
-#_C.optim.weight_decay = 1e-6
+_C.optim.lr_decay = 0.95       
+_C.optim.lr_decay_steps = 10  
 _C.optim.weight_decay = 0
-_C.optim.max_epoch = 40
+_C.optim.max_epoch = 150     # Changed from 60 to 150
 _C.optim.grad_acc_steps = 1
+
 
 # model - backbone
 _C.backbone = edict()
 _C.backbone.num_stages = 4
-_C.backbone.init_voxel_size = 0.02
+_C.backbone.init_voxel_size = 0.025
 _C.backbone.kernel_size = 15
 _C.backbone.base_radius = 2.5
 _C.backbone.base_sigma = 2.0
 _C.backbone.init_radius = _C.backbone.base_radius * _C.backbone.init_voxel_size
 _C.backbone.init_sigma = _C.backbone.base_sigma * _C.backbone.init_voxel_size
 _C.backbone.group_norm = 32
-_C.backbone.input_dim = 1
-_C.backbone.init_dim = 64
-_C.backbone.output_dim = 256
+_C.backbone.input_dim = 1      
+_C.backbone.init_dim = 64   
+_C.backbone.output_dim = 256  
 
 # model - Global
 _C.model = edict()
-_C.model.ground_truth_matching_radius = 0.05
+_C.model.ground_truth_matching_radius = 0.05 
 _C.model.num_points_in_patch = 64
 _C.model.num_sinkhorn_iterations = 100
 
 # model - Coarse Matching
 _C.coarse_matching = edict()
-_C.coarse_matching.num_targets = 16
+_C.coarse_matching.num_targets = 128
 _C.coarse_matching.overlap_threshold = 0.1
-_C.coarse_matching.num_correspondences = 32
+_C.coarse_matching.num_correspondences = 256
 _C.coarse_matching.dual_normalization = True
 
 # model - GeoTransformer
 _C.geotransformer = edict()
-_C.geotransformer.input_dim = 1024
+_C.geotransformer.input_dim = 1024    
 _C.geotransformer.hidden_dim = 256
 _C.geotransformer.output_dim = 256
 _C.geotransformer.num_heads = 4

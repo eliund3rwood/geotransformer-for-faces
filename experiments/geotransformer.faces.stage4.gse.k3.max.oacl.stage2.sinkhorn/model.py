@@ -5,6 +5,7 @@ from IPython import embed
 
 from geotransformer.modules.ops import point_to_node_partition, index_select
 from geotransformer.modules.registration import get_node_correspondences
+from geotransformer.utils.data import precompute_data_stack_mode
 from geotransformer.modules.sinkhorn import LearnableLogOptimalTransport
 from geotransformer.modules.geotransformer import (
     GeometricTransformer,
@@ -12,7 +13,7 @@ from geotransformer.modules.geotransformer import (
     SuperPointTargetGenerator,
     LocalGlobalRegistration,
 )
-
+from pytorch3d.ops import sample_farthest_points
 from backbone import KPConvFPN
 
 class CrossAttentionRegressor(nn.Module):
@@ -34,26 +35,50 @@ class CrossAttentionRegressor(nn.Module):
         )
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
         
-        # Final proj from feature_dim -> 100 PCA coeffs
-        self.output_proj = nn.Linear(feature_dim, num_coeffs)
+        # NEW: Point encoder to lift 3D coordinates to feature_dim
+        self.point_encoder = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(),
+            nn.Linear(64, 256),
+            nn.ReLU(),
+            nn.Linear(256, feature_dim)
+        )
         
-    def forward(self, src_feats_padded, src_padding_mask):
+        # Final proj from feature_dim -> 100 PCA coeffs + 1 Scale
+        self.output_proj = nn.Linear(feature_dim, num_coeffs + 1)
+        
+        # Start scale at exactly 1.0
+        with torch.no_grad():
+            nn.init.constant_(self.output_proj.bias[0], 0.0)
+        
+    def forward(self, src_coords_padded, src_padding_mask):
+
+        # Pass raw coordinates through MLP
+        src_feats_encoded = self.point_encoder(src_coords_padded)
 
         # Align tokens to match input batch size
-        B = src_feats_padded.shape[0]
+        B = src_coords_padded.shape[0]
         tokens = self.patch_tokens.expand(B, -1, -1)
         
         # Cross Attention
         updated_tokens = self.transformer_decoder(
             tgt=tokens, 
-            memory=src_feats_padded,
+            memory=src_feats_encoded,
             memory_key_padding_mask=src_padding_mask
         ) 
         
-        # Project to PCA coeffs
-        coeffs = self.output_proj(updated_tokens)
+        # Project to 101 values
+        raw_output = self.output_proj(updated_tokens) # Shape: [B, 32, 101]
+
+        # Scale Constraint 
+        # Map raw logits for index 0 to [0.4, 1.6]
+        scale_logits = raw_output[:, :, 0].mean(dim=1) 
+        pred_scale = 0.4 + 1.2 * torch.sigmoid(scale_logits)
         
-        return coeffs
+        # Keep the remaining 100 indices for the per-patch PCA coefficients [B, 32, 100]
+        coeffs = raw_output[:, :, 1:] 
+        
+        return coeffs, pred_scale
 
 class GeoTransformer(nn.Module):
     def __init__(self, cfg):
@@ -125,11 +150,18 @@ class GeoTransformer(nn.Module):
 
         self.optimal_transport = LearnableLogOptimalTransport(cfg.model.num_sinkhorn_iterations)
 
+        # Backbone graph hyperparams — used to rebuild the graph in forward()
+        self.num_stages = cfg.backbone.num_stages
+        self.init_voxel_size = cfg.backbone.init_voxel_size
+        self.init_radius = cfg.backbone.init_radius
+        self.neighbor_limits = None  # set by trainer after construction
+
     def generate_reference_geometry(self, z_delta):
         num_patches = self.patch_indices.shape[0]
         k_neighbors = self.patch_indices.shape[1]
 
         # Reconstruction: mean + z_delta @ basis
+        # z_delta is [32, 100]. unsqueeze(1) makes it [32, 1, 100]
         delta = torch.matmul(z_delta.unsqueeze(1), self.pca_basis).squeeze(1)
         reconstructed_patches_flat = self.pca_mean + delta
         reconstructed_points = reconstructed_patches_flat.view(num_patches, k_neighbors, 3)
@@ -158,66 +190,91 @@ class GeoTransformer(nn.Module):
         has_points = torch.zeros(num_global_verts, dtype=torch.bool, device=z_delta.device)
         has_points[valid_global_indices] = True
         ref_points[has_points] = flat_points[best_idx_per_global[has_points]]
-        
+
         return ref_points
 
     def forward(self, data_dict):
         output_dict = {}
 
-        # Isolate src pts
-        ref_length_orig = data_dict['lengths'][0][0].item()
-        orig_points = data_dict['points'][0] # [ref; src]
-        src_points = orig_points[ref_length_orig:]
-        src_feats_raw = data_dict['features'][ref_length_orig:]
+        # --- 1. Extract raw src ---
+        # Robustly handle both precomputed lists and raw flat tensors
+        if isinstance(data_dict['lengths'], list):
+            # Dataloader is still precomputing! Extract the stage 0 flat tensors.
+            flat_lengths = data_dict['lengths'][0]
+            flat_points = data_dict['points'][0]
+        else:
+            # precompute_data=False worked as intended
+            flat_lengths = data_dict['lengths']
+            flat_points = data_dict['points']
 
-        # Run backbone on ref + src & extract src coarse feats
+        ref_length_stage0 = flat_lengths[0].item()
+        src_points_raw = flat_points[ref_length_stage0:]
+
+        # --- 2. Predict Scale & Coeffs from Raw Points ---
+        num_samples = 1024
+        num_src_points = src_points_raw.shape[0]
+
+        if num_src_points > num_samples:
+            src_coords_batched, _ = sample_farthest_points(src_points_raw.unsqueeze(0), K=num_samples)
+        else:
+            src_coords_batched = src_points_raw.unsqueeze(0)
+
+        padding_mask = torch.zeros((1, src_coords_batched.shape[1]), dtype=torch.bool, device=src_points_raw.device)
+
+        centroid = src_coords_batched.mean(dim=1, keepdim=True)
+        src_coords_centered = src_coords_batched - centroid
+
+        z_delta_batched, pred_scale_batched = self.coeff_regressor(src_coords_centered, padding_mask)
+
+        z_delta = z_delta_batched.squeeze(0)
+        pred_scale = pred_scale_batched.squeeze()
+
+        output_dict['z_coefficients'] = z_delta
+        output_dict['pred_scale'] = pred_scale
+
+        # --- 3. Morph Ref Points and Dynamically Compute Graph ---
+        with torch.no_grad():
+            new_ref_points = self.generate_reference_geometry(z_delta.detach())
+            output_dict['morphed_full'] = new_ref_points
+
+            gt_z = data_dict['gt_z']
+            recon_gt_points = self.generate_reference_geometry(gt_z)
+            output_dict['recon_gt_points'] = recon_gt_points
+
+            # Scale the raw source points
+            src_points_scaled = src_points_raw / pred_scale.detach()
+
+            # Combine morphed ref and scaled src into a single tensor
+            new_points = torch.cat([new_ref_points, src_points_scaled], dim=0)
+
+            # Extract the device so we can return the graph to the GPU
+            device = new_points.device
+
+            # The graph-building ops expect tensors on the CPU
+            graph_dict = precompute_data_stack_mode(
+                new_points.cpu(), 
+                flat_lengths.cpu(), # <--- Safely using the 1D tensor
+                self.num_stages, 
+                self.init_voxel_size, 
+                self.init_radius, 
+                self.neighbor_limits
+            )
+
+            # Move the computed lists of tensors back to the GPU
+            for key in ['points', 'lengths', 'neighbors', 'subsampling', 'upsampling']:
+                if key in graph_dict:
+                    graph_dict[key] = [t.to(device) for t in graph_dict[key]]
+
+            # Overwrite the flat data_dict properties with the newly computed graph lists
+            data_dict.update(graph_dict)
+
+        # --- 4. Run Backbone on dynamically computed graph ---
         feats_list = self.backbone(data_dict['features'], data_dict)
 
-        coarse_feats_all = feats_list[-1]
+        feats_c = feats_list[-1]
+        feats_f = feats_list[0]
 
-        ref_len_c = data_dict['lengths'][-1][0].item()
-        src_coarse_feats = coarse_feats_all[ref_len_c:]
-
-        # Predict coeffs via Cross-Attention
-        src_feats_batched = src_coarse_feats.unsqueeze(0)
-        
-        # Padding mask 
-        padding_mask = torch.zeros((1, src_coarse_feats.shape[0]), dtype=torch.bool, device=src_coarse_feats.device)
-        
-        # Pass through regressor
-        z_delta_batched = self.coeff_regressor(src_feats_batched, padding_mask)
-        
-        z_delta = z_delta_batched.squeeze(0)
-        output_dict['z_coefficients'] = z_delta
-
-        # Morph ref with pred coeffs 
-        new_ref_points = self.generate_reference_geometry(z_delta)
-        output_dict['morphed_full'] = new_ref_points 
-
-        # Morph ref with GT coeffs
-        gt_z = data_dict['gt_z']
-        recon_gt_points = self.generate_reference_geometry(gt_z)
-        output_dict['recon_gt_points'] = recon_gt_points
-
-        # Detach for second pass so rigid alignment loss terms (f_loss & c_loss) can't influence pred coeffs
-        new_ref_points_detached = new_ref_points.detach()
-
-        # Construct new input for second pass
-        new_points = torch.cat([new_ref_points_detached, src_points], dim=0)
-        new_lengths = torch.tensor([len(new_ref_points_detached), len(src_points)], dtype=torch.int32)
-
-        data_dict['points'][0] = new_points
-        data_dict['lengths'][0] = new_lengths
-
-        orig_feat_dim = data_dict['features'].shape[1]
-        new_ref_feats = torch.ones((len(new_ref_points), orig_feat_dim), device=orig_points.device)
-        data_dict['features'] = torch.cat([new_ref_feats, src_feats_raw], dim=0)
-
-        feats_list_new = self.backbone(data_dict['features'], data_dict)
-
-        feats_c = feats_list_new[-1]
-        feats_f = feats_list_new[0]
-
+        # --- 5. Extract Points and Features ---
         ref_length_c = data_dict['lengths'][-1][0].item()
         ref_length_f = data_dict['lengths'][1][0].item()
         ref_length = data_dict['lengths'][0][0].item()
@@ -253,7 +310,7 @@ class GeoTransformer(nn.Module):
         src_node_knn_points = index_select(src_padded_points_f, src_node_knn_indices, dim=0)
 
         transform = data_dict['transform'].detach()
-
+    
         gt_node_corr_indices, gt_node_corr_overlaps = get_node_correspondences(
             ref_points_c,
             src_points_c,

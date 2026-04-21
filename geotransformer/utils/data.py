@@ -12,11 +12,6 @@ from geotransformer.utils.torch import build_dataloader
 
 def precompute_data_stack_mode(points, lengths, num_stages, voxel_size, radius, neighbor_limits):
 
-    fixed_indices = torch.tensor([75, 411, 2699, 911, 8594, 3380, 6731, 9710, 9633, 119, 
-                                  3441, 6319, 9541, 8732, 6162, 3774, 8296, 3151, 10, 
-                                  7720, 6858, 7409, 7531, 3504, 6937, 4189, 8891, 3721, 
-                                  9241, 2213, 1765, 7547], dtype=torch.long, device=points.device)
-
     assert num_stages == len(neighbor_limits)
 
     points_list = []
@@ -32,16 +27,6 @@ def precompute_data_stack_mode(points, lengths, num_stages, voxel_size, radius, 
         points_list.append(points)
         lengths_list.append(lengths)
         voxel_size *= 2
-
-    original_coarse_ref_points_length = lengths_list[-1][0]
-    original_coarse_src_points_length = lengths_list[-1][1]
-
-    new_coarse_points_length = fixed_indices.numel() + original_coarse_src_points_length
-    new_coarse_points = torch.cat(
-        [points_list[0][fixed_indices], points_list[-1][original_coarse_ref_points_length:]], dim=0
-    )
-    points_list[-1] = new_coarse_points
-    lengths_list[-1][0] = torch.tensor([fixed_indices.numel()], dtype=lengths.dtype, device=lengths.device)
 
     for idx in range(len(points_list)):
         points_list[idx] = points_list[idx].to(torch.device("cpu"), dtype=torch.float32).contiguous()
