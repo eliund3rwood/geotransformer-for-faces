@@ -86,14 +86,15 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         1. Random rotation to one point cloud.
         2. Random noise.
         """
-        aug_rotation = random_sample_rotation(self.aug_rotation)
-        if random.random() > 0.5:
-            ref_points = np.matmul(ref_points, aug_rotation.T)
-            rotation = np.matmul(aug_rotation, rotation)
-            translation = np.matmul(aug_rotation, translation)
-        else:
-            src_points = np.matmul(src_points, aug_rotation.T)
-            rotation = np.matmul(rotation, aug_rotation.T)
+        if self.aug_rotation != 0.0:
+            aug_rotation = random_sample_rotation(self.aug_rotation)
+            if random.random() > 0.5:
+                ref_points = np.matmul(ref_points, aug_rotation.T)
+                rotation = np.matmul(aug_rotation, rotation)
+                translation = np.matmul(aug_rotation, translation)
+            else:
+                src_points = np.matmul(src_points, aug_rotation.T)
+                rotation = np.matmul(rotation, aug_rotation.T)
 
         ref_points += (np.random.rand(ref_points.shape[0], 3) - 0.5) * self.aug_noise
         src_points += (np.random.rand(src_points.shape[0], 3) - 0.5) * self.aug_noise
@@ -171,10 +172,15 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
                 alphas = np.random.rand(num_to_interpolate, 1).astype(np.float32)
                 interpolated_points = base_points + alphas * (neighbor_points - base_points)
                 src_points = np.concatenate([src_points, interpolated_points], axis=0)
-                
+                src_points = src_points[np.random.permutation(len(src_points))]
+
             elif ratio < 1.0:
                 indices = np.random.choice(num_points, target_count, replace=False)
                 src_points = src_points[indices]
+
+            else:
+                # ratio == 1.0: keep all points but shuffle order, matching train behavior
+                src_points = src_points[np.random.permutation(num_points)]
 
             # Scale Augmentation 
             assert self.aug_scale_min == self.aug_scale_max, f"aug_scale_min ({self.aug_scale_min}) != aug_scale_max ({self.aug_scale_max})"

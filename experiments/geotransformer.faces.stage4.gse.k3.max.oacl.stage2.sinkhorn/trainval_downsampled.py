@@ -57,6 +57,7 @@ class Trainer(EpochBasedTrainer):
         self.evaluator = Evaluator(cfg).cuda()
         self.epoch_board = SummaryBoard(adaptive=True)
 
+
     def before_train_epoch(self, epoch):
         self.epoch_board.reset_all()
 

@@ -41,7 +41,7 @@ _C.train.num_workers = 12
 _C.train.point_limit = 30000
 _C.train.use_augmentation = True
 _C.train.augmentation_noise = 0.01
-_C.train.augmentation_rotation = 1.0
+_C.train.augmentation_rotation = 0.0
 
 # test data
 _C.test = edict()
@@ -70,7 +70,7 @@ _C.optim.lr = 1e-4
 _C.optim.lr_decay = 0.95       
 _C.optim.lr_decay_steps = 10  
 _C.optim.weight_decay = 0
-_C.optim.max_epoch = 150     # Changed from 60 to 150
+_C.optim.max_epoch = 40
 _C.optim.grad_acc_steps = 1
 
 
@@ -90,7 +90,7 @@ _C.backbone.output_dim = 256
 
 # model - Global
 _C.model = edict()
-_C.model.ground_truth_matching_radius = 0.05 
+_C.model.ground_truth_matching_radius = 0.05
 _C.model.num_points_in_patch = 64
 _C.model.num_sinkhorn_iterations = 100
 
