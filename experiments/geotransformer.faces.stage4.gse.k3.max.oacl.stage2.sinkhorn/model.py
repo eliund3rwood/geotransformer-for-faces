@@ -13,71 +13,120 @@ from geotransformer.modules.geotransformer import (
     SuperPointTargetGenerator,
     LocalGlobalRegistration,
 )
-from pytorch3d.ops import sample_farthest_points
+from pytorch3d.ops import sample_farthest_points, knn_points
 from backbone import KPConvFPN
 
+
+class PointNetPPEncoder(nn.Module):
+    def __init__(self, feature_dim=1024, num_sampled_points=128, k_neighbors=32):
+        super().__init__()
+        self.num_sampled_points = num_sampled_points
+        self.k_neighbors = k_neighbors
+
+        # Shared MLP applied to relative coords of each neighbor w.r.t. its centroid
+        self.mlp = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, feature_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, coords):
+        # coords: [B, N, 3]
+        B, N, _ = coords.shape
+
+        # FPS: pick num_sampled_points representative centroids
+        centroids, _ = sample_farthest_points(coords, K=self.num_sampled_points)
+        # centroids: [B, S, 3]
+
+        # kNN: for each centroid find k nearest neighbors in the full cloud
+        knn_result = knn_points(centroids, coords, K=self.k_neighbors)
+        knn_idx = knn_result.idx  # [B, S, k]
+
+        S, k = self.num_sampled_points, self.k_neighbors
+
+        # Gather neighbor coordinates
+        idx_flat = knn_idx.reshape(B, S * k)
+        neighbors = torch.gather(coords, 1, idx_flat.unsqueeze(-1).expand(-1, -1, 3))
+        neighbors = neighbors.reshape(B, S, k, 3)
+
+        # Relative coordinates w.r.t. each centroid — removes global position bias
+        rel_coords = neighbors - centroids.unsqueeze(2)  # [B, S, k, 3]
+
+        # Shared MLP (Linear applies to last dim, works on any leading dims)
+        feats = self.mlp(rel_coords)  # [B, S, k, feature_dim]
+
+        # PointNet-style max pool over k neighbors
+        feats, _ = feats.max(dim=2)  # [B, S, feature_dim]
+
+        return feats
+
+
 class CrossAttentionRegressor(nn.Module):
-    def __init__(self, feature_dim=256, num_patches=32, num_coeffs=100, nhead=4, num_layers=2):
+    def __init__(
+        self,
+        feature_dim=128,
+        num_patches=32,
+        num_coeffs=100,
+        nhead=4,
+        num_layers=2,
+        num_sampled_points=128,
+        k_neighbors=32,
+        dropout=0.1,
+    ):
         super().__init__()
         self.num_patches = num_patches
         self.feature_dim = feature_dim
-        
-        # 32 learnable tokens
+
+        # Learnable query tokens — one per patch
         self.patch_tokens = nn.Parameter(torch.randn(1, num_patches, feature_dim))
-        
+
         # Cross-Attention Decoder
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model=feature_dim, 
-            nhead=nhead, 
+            d_model=feature_dim,
+            nhead=nhead,
             dim_feedforward=feature_dim * 2,
             batch_first=True,
-            norm_first=True 
+            norm_first=True,
+            dropout=dropout,
         )
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
-        
-        # NEW: Point encoder to lift 3D coordinates to feature_dim
-        self.point_encoder = nn.Sequential(
-            nn.Linear(3, 64),
-            nn.ReLU(),
-            nn.Linear(64, 256),
-            nn.ReLU(),
-            nn.Linear(256, feature_dim)
+
+        # PointNet++ set abstraction encoder
+        self.point_encoder = PointNetPPEncoder(
+            feature_dim=feature_dim,
+            num_sampled_points=num_sampled_points,
+            k_neighbors=k_neighbors,
         )
-        
-        # Final proj from feature_dim -> 100 PCA coeffs + 1 Scale
+
+        # Final proj: feature_dim -> 100 PCA coeffs + 1 scale
         self.output_proj = nn.Linear(feature_dim, num_coeffs + 1)
-        
-        # Start scale at exactly 1.0
+
         with torch.no_grad():
             nn.init.constant_(self.output_proj.bias[0], 0.0)
-        
-    def forward(self, src_coords_padded, src_padding_mask):
 
-        # Pass raw coordinates through MLP
+    def forward(self, src_coords_padded, src_padding_mask):
+        # Encode: FPS + kNN + MLP + max-pool -> [B, num_sampled_points, feature_dim]
         src_feats_encoded = self.point_encoder(src_coords_padded)
 
-        # Align tokens to match input batch size
         B = src_coords_padded.shape[0]
         tokens = self.patch_tokens.expand(B, -1, -1)
-        
-        # Cross Attention
-        updated_tokens = self.transformer_decoder(
-            tgt=tokens, 
-            memory=src_feats_encoded,
-            memory_key_padding_mask=src_padding_mask
-        ) 
-        
-        # Project to 101 values
-        raw_output = self.output_proj(updated_tokens) # Shape: [B, 32, 101]
 
-        # Scale Constraint 
-        # Map raw logits for index 0 to [0.4, 1.6]
-        scale_logits = raw_output[:, :, 0].mean(dim=1) 
+        # No padding mask needed — memory is always exactly num_sampled_points
+        updated_tokens = self.transformer_decoder(
+            tgt=tokens,
+            memory=src_feats_encoded,
+        )
+
+        raw_output = self.output_proj(updated_tokens)  # [B, num_patches, num_coeffs+1]
+
+        scale_logits = raw_output[:, :, 0].mean(dim=1)
         pred_scale = 0.4 + 1.2 * torch.sigmoid(scale_logits)
-        
-        # Keep the remaining 100 indices for the per-patch PCA coefficients [B, 32, 100]
-        coeffs = raw_output[:, :, 1:] 
-        
+
+        coeffs = raw_output[:, :, 1:]  # [B, num_patches, num_coeffs]
+
         return coeffs, pred_scale
 
 class GeoTransformer(nn.Module):
@@ -99,11 +148,14 @@ class GeoTransformer(nn.Module):
         self.register_buffer("z_template", gt_z_mean)
 
         self.coeff_regressor = CrossAttentionRegressor(
-            feature_dim=1024,
+            feature_dim=128, #this was set a 256 not 128 for experiments
             num_patches=32,
             num_coeffs=100,
             nhead=4,
-            num_layers=2
+            num_layers=2,
+            num_sampled_points=cfg.model.coeff_regressor_sampled_points,
+            k_neighbors=cfg.model.coeff_regressor_k_neighbors,
+            dropout=cfg.model.coeff_regressor_dropout,
         )
 
         self.backbone = KPConvFPN(
@@ -155,6 +207,7 @@ class GeoTransformer(nn.Module):
         self.init_voxel_size = cfg.backbone.init_voxel_size
         self.init_radius = cfg.backbone.init_radius
         self.neighbor_limits = None  # set by trainer after construction
+        self.max_superpoints = cfg.model.max_superpoints
 
     def generate_reference_geometry(self, z_delta):
         num_patches = self.patch_indices.shape[0]
@@ -193,8 +246,18 @@ class GeoTransformer(nn.Module):
 
         return ref_points
 
+    @staticmethod
+    def _mem(label):
+        if not torch.cuda.is_available():
+            return
+        alloc = torch.cuda.memory_allocated() / 1e6
+        peak  = torch.cuda.max_memory_allocated() / 1e6
+        # print(f"[MEM] {label:<45s}  alloc={alloc:7.1f} MB  peak={peak:7.1f} MB")
+
     def forward(self, data_dict):
         output_dict = {}
+        torch.cuda.reset_peak_memory_stats()
+        self._mem("start")
 
         # --- 1. Extract raw src ---
         # Robustly handle both precomputed lists and raw flat tensors
@@ -224,7 +287,9 @@ class GeoTransformer(nn.Module):
         centroid = src_coords_batched.mean(dim=1, keepdim=True)
         src_coords_centered = src_coords_batched - centroid
 
+        self._mem("before coeff_regressor (FPS done)")
         z_delta_batched, pred_scale_batched = self.coeff_regressor(src_coords_centered, padding_mask)
+        self._mem("after  coeff_regressor")
 
         z_delta = z_delta_batched.squeeze(0)
         pred_scale = pred_scale_batched.squeeze()
@@ -250,13 +315,17 @@ class GeoTransformer(nn.Module):
             # Extract the device so we can return the graph to the GPU
             device = new_points.device
 
+            # Scale voxel size with pred_scale so superpoint density stays
+            # constant regardless of the predicted scale value.
+            eff_scale = pred_scale.clamp(0.4, 1.6).item()
+
             # The graph-building ops expect tensors on the CPU
             graph_dict = precompute_data_stack_mode(
-                new_points.cpu(), 
-                flat_lengths.cpu(), # <--- Safely using the 1D tensor
-                self.num_stages, 
-                self.init_voxel_size, 
-                self.init_radius, 
+                new_points.cpu(),
+                flat_lengths.cpu(),
+                self.num_stages,
+                self.init_voxel_size,
+                self.init_radius,
                 self.neighbor_limits
             )
 
@@ -267,9 +336,12 @@ class GeoTransformer(nn.Module):
 
             # Overwrite the flat data_dict properties with the newly computed graph lists
             data_dict.update(graph_dict)
+            self._mem("after  graph build + GPU transfer")
 
         # --- 4. Run Backbone on dynamically computed graph ---
+        self._mem("before backbone")
         feats_list = self.backbone(data_dict['features'], data_dict)
+        self._mem("after  backbone")
 
         feats_c = feats_list[-1]
         feats_f = feats_list[0]
@@ -285,6 +357,17 @@ class GeoTransformer(nn.Module):
 
         ref_points_c = points_c[:ref_length_c]
         src_points_c = points_c[ref_length_c:]
+
+        ref_fps_idx = src_fps_idx = None
+        if self.max_superpoints is not None:
+            if ref_points_c.shape[0] > self.max_superpoints:
+                _, ref_fps_idx = sample_farthest_points(ref_points_c.unsqueeze(0), K=self.max_superpoints)
+                ref_fps_idx = ref_fps_idx.squeeze(0)
+                ref_points_c = ref_points_c[ref_fps_idx]
+            if src_points_c.shape[0] > self.max_superpoints:
+                _, src_fps_idx = sample_farthest_points(src_points_c.unsqueeze(0), K=self.max_superpoints)
+                src_fps_idx = src_fps_idx.squeeze(0)
+                src_points_c = src_points_c[src_fps_idx]
         ref_points_f = points_f[:ref_length_f]
         src_points_f = points_f[ref_length_f:]
         ref_points = points[:ref_length]
@@ -328,13 +411,19 @@ class GeoTransformer(nn.Module):
         output_dict['gt_node_corr_overlaps'] = gt_node_corr_overlaps
 
         ref_feats_c = feats_c[:ref_length_c]
+        if ref_fps_idx is not None:
+            ref_feats_c = ref_feats_c[ref_fps_idx]
         src_feats_c = feats_c[ref_length_c:]
+        if src_fps_idx is not None:
+            src_feats_c = src_feats_c[src_fps_idx]
+        self._mem("before geometric transformer")
         ref_feats_c, src_feats_c = self.transformer(
             ref_points_c.unsqueeze(0),
             src_points_c.unsqueeze(0),
             ref_feats_c.unsqueeze(0),
             src_feats_c.unsqueeze(0),
         )
+        self._mem("after  geometric transformer")
         ref_feats_c_norm = F.normalize(ref_feats_c.squeeze(0), p=2, dim=1)
         src_feats_c_norm = F.normalize(src_feats_c.squeeze(0), p=2, dim=1)
 
@@ -379,6 +468,7 @@ class GeoTransformer(nn.Module):
         matching_scores = torch.einsum('bnd,bmd->bnm', ref_node_corr_knn_feats, src_node_corr_knn_feats) 
         matching_scores = matching_scores / feats_f.shape[1] ** 0.5
         matching_scores = self.optimal_transport(matching_scores, ref_node_corr_knn_masks, src_node_corr_knn_masks)
+        self._mem("after  optimal transport")
 
         output_dict['matching_scores'] = matching_scores
 
@@ -400,6 +490,7 @@ class GeoTransformer(nn.Module):
             output_dict['corr_scores'] = corr_scores
             output_dict['estimated_transform'] = estimated_transform
 
+        self._mem("end of forward")
         return output_dict
 
 

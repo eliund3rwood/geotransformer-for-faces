@@ -15,7 +15,7 @@ _C.seed = 7351
 # dirs
 _C.working_dir = osp.dirname(osp.realpath(__file__))
 _C.root_dir = osp.dirname(osp.dirname(_C.working_dir))
-_C.exp_name = osp.basename("geotransformer.facesdownsampledpointnetpp-r128-config-lr5-4.stage4.gse.k3.max.oacl.stage2.sinkhorn")
+_C.exp_name = osp.basename("geotransformer.facesdownsampledpointnetpp-128-config.stage4.gse.k3.max.oacl.stage2.sinkhorn")
 _C.output_dir = osp.join(_C.root_dir, 'output', _C.exp_name)
 _C.snapshot_dir = osp.join(_C.output_dir, 'snapshots')
 _C.log_dir = osp.join(_C.output_dir, 'logs')
@@ -52,23 +52,23 @@ _C.test.point_limit = None
 # evaluation
 _C.eval = edict()
 _C.eval.acceptance_overlap = 0.0
-_C.eval.acceptance_radius = 0.025
+_C.eval.acceptance_radius = 0.1
 _C.eval.inlier_ratio_threshold = 0.05
-_C.eval.rmse_threshold = 0.025
-_C.eval.rre_threshold = 5.0
-_C.eval.rte_threshold = 0.025
+_C.eval.rmse_threshold = 0.2
+_C.eval.rre_threshold = 15.0
+_C.eval.rte_threshold = 0.3
 
 # ransac
 _C.ransac = edict()
-_C.ransac.distance_threshold = 0.025
+_C.ransac.distance_threshold = 0.05
 _C.ransac.num_points = 3
 _C.ransac.num_iterations = 1000
 
 # optim
 _C.optim = edict()
-_C.optim.lr = 5e-4
+_C.optim.lr = 1e-4
 _C.optim.lr_decay = 0.95       
-_C.optim.lr_decay_steps = 2  
+_C.optim.lr_decay_steps = 10  
 _C.optim.weight_decay = 0
 _C.optim.max_epoch = 40
 _C.optim.grad_acc_steps = 1
@@ -120,7 +120,7 @@ _C.geotransformer.reduction_a = 'max'
 # model - Fine Matching
 _C.fine_matching = edict()
 _C.fine_matching.topk = 3
-_C.fine_matching.acceptance_radius = 0.025
+_C.fine_matching.acceptance_radius = 0.1
 _C.fine_matching.mutual = True
 _C.fine_matching.confidence_threshold = 0.05
 _C.fine_matching.use_dustbin = False
@@ -140,7 +140,7 @@ _C.coarse_loss.positive_overlap = 0.1
 
 # loss - Fine level
 _C.fine_loss = edict()
-_C.fine_loss.positive_radius = 0.025
+_C.fine_loss.positive_radius = 0.05
 
 # loss - Overall
 _C.loss = edict()

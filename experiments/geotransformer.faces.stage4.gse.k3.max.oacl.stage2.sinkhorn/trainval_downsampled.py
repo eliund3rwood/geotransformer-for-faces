@@ -44,7 +44,7 @@ class Trainer(EpochBasedTrainer):
     
         optim_groups = [
             {'params': decay_params, 'weight_decay': cfg.optim.weight_decay},
-            {'params': no_decay_params, 'weight_decay': 0.0} # coeff_regressor exempted from decay
+            {'params': no_decay_params, 'weight_decay': 0.0, 'lr': 1e-3} # coeff_regressor exempted from decay
         ]
         
         optimizer = optim.Adam(optim_groups, lr=cfg.optim.lr)
@@ -95,7 +95,7 @@ class Trainer(EpochBasedTrainer):
         """
         Overriding the actual engine hook to perform multi-pass testing.
         """
-        if self.epoch % 20 != 0:
+        if self.epoch % 2 != 0:
             return
 
         # 1. Save original loader to restore it later
