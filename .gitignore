@@ -5,7 +5,7 @@ __pycache__/
 build/
 *.so
 .claude/
-
+viz_*
 # Ignore data directories
 data/
 scans/
