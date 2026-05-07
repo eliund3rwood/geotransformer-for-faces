@@ -49,6 +49,8 @@ _C.train.use_sphere_dropout = False
 _C.train.p_sphere_dropout = 0.4
 _C.train.use_multiplane_crop = False
 _C.train.p_multiplane_crop = 0.4
+_C.train.aug_min_extent_fraction = 0.6
+
 
 # test data
 _C.test = edict()

@@ -124,7 +124,6 @@ class CrossAttentionRegressor(nn.Module):
         updated_tokens = self.transformer_decoder(
             tgt=tokens,
             memory=src_feats_encoded,
-            memory_key_padding_mask=src_padding_mask,
         )
 
         raw_output = self.output_proj(updated_tokens)  # [B, num_patches, num_coeffs+1]

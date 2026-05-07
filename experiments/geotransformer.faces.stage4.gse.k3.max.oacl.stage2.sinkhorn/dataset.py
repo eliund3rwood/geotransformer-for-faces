@@ -14,12 +14,13 @@ class FaceAugDataset(torch.utils.data.Dataset):
     """Wraps ThreeDMatchPairDataset and applies face-specific augmentations
     (multi-plane crop, sphere dropout) independently to ref and src point clouds."""
 
-    def __init__(self, base_dataset, use_multiplane_crop, p_multiplane_crop, use_sphere_dropout, p_sphere_dropout):
+    def __init__(self, base_dataset, use_multiplane_crop, p_multiplane_crop, use_sphere_dropout, p_sphere_dropout, min_extent_fraction=0.4):
         self.base = base_dataset
         self.use_multiplane_crop = use_multiplane_crop
         self.p_multiplane_crop = p_multiplane_crop
         self.use_sphere_dropout = use_sphere_dropout
         self.p_sphere_dropout = p_sphere_dropout
+        self.min_extent_fraction = min_extent_fraction
 
     def __len__(self):
         return len(self.base)
@@ -31,8 +32,8 @@ class FaceAugDataset(torch.utils.data.Dataset):
             p_multiplane_crop=self.p_multiplane_crop,
             use_sphere_dropout=self.use_sphere_dropout,
             p_sphere_dropout=self.p_sphere_dropout,
+            min_extent_fraction=self.min_extent_fraction,
         )
-        data_dict['ref_points'] = apply_face_augmentations(data_dict['ref_points'], **kwargs)
         data_dict['src_points'] = apply_face_augmentations(data_dict['src_points'], **kwargs)
         data_dict['ref_feats'] = np.ones((len(data_dict['ref_points']), 1), dtype=np.float32)
         data_dict['src_feats'] = np.ones((len(data_dict['src_points']), 1), dtype=np.float32)
@@ -61,6 +62,7 @@ def train_valid_data_loader(cfg, distributed, val_aug_scale=1.0, val_aug_subsamp
             p_multiplane_crop=cfg.train.p_multiplane_crop,
             use_sphere_dropout=cfg.train.use_sphere_dropout,
             p_sphere_dropout=cfg.train.p_sphere_dropout,
+            min_extent_fraction=cfg.train.aug_min_extent_fraction,
         )
 
     if cfg.train.max_samples is not None:
