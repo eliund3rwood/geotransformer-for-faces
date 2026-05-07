@@ -125,6 +125,9 @@ class EpochBasedTrainer(BaseTrainer):
         if self.scheduler is not None:
             self.scheduler.step()
         # snapshot
+        self.checkpoint()
+
+    def checkpoint(self):
         self.save_snapshot(f'epoch-{self.epoch}.pth.tar')
         if not self.save_all_snapshots:
             last_snapshot = f'epoch-{self.epoch - 1}.pth.tar'

@@ -20,6 +20,7 @@ class LocalGlobalRegistration(nn.Module):
         correspondence_threshold: int = 3,
         correspondence_limit: Optional[int] = None,
         num_refinement_steps: int = 5,
+        use_umeyama: bool = False,
     ):
         r"""Point Matching with Local-to-Global Registration.
 
@@ -33,6 +34,7 @@ class LocalGlobalRegistration(nn.Module):
             correspondence_threshold (int=3): minimal number of correspondences for each patch correspondence.
             correspondence_limit (optional[int]=None): maximal number of verification correspondences.
             num_refinement_steps (int=5): number of refinement steps.
+            use_umeyama (bool=False): use Umeyama similarity transform instead of Procrustes.
         """
         super(LocalGlobalRegistration, self).__init__()
         self.k = k
@@ -44,7 +46,7 @@ class LocalGlobalRegistration(nn.Module):
         self.correspondence_threshold = correspondence_threshold
         self.correspondence_limit = correspondence_limit
         self.num_refinement_steps = num_refinement_steps
-        self.procrustes = WeightedProcrustes(return_transform=True)
+        self.procrustes = WeightedProcrustes(return_transform=True, use_umeyama=use_umeyama)
 
     def compute_correspondence_matrix(self, score_mat, ref_knn_masks, src_knn_masks):
         r"""Compute matching matrix and score matrix for each patch correspondence."""
