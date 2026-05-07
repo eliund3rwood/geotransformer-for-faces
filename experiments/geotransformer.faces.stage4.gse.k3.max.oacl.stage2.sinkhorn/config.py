@@ -43,7 +43,7 @@ _C.train.num_workers = 12
 _C.train.point_limit = 30000
 _C.train.max_samples = None
 _C.train.use_augmentation = True
-_C.train.augmentation_noise = 0.05
+_C.train.augmentation_noise = 0.01
 _C.train.augmentation_rotation = 0.0
 _C.train.use_sphere_dropout = False
 _C.train.p_sphere_dropout = 0.4
@@ -62,11 +62,11 @@ _C.test.max_samples = None
 # evaluation
 _C.eval = edict()
 _C.eval.acceptance_overlap = 0.0
-_C.eval.acceptance_radius = 0.04
+_C.eval.acceptance_radius = 0.1
 _C.eval.inlier_ratio_threshold = 0.05
-_C.eval.rmse_threshold = 0.05
+_C.eval.rmse_threshold = 0.2
 _C.eval.rre_threshold = 15.0
-_C.eval.rte_threshold = 0.05
+_C.eval.rte_threshold = 0.3
 
 # ransac
 _C.ransac = edict()

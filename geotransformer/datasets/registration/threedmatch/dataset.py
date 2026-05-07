@@ -96,7 +96,7 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
                 src_points = np.matmul(src_points, aug_rotation.T)
                 rotation = np.matmul(rotation, aug_rotation.T)
 
-        ref_points += (np.random.rand(ref_points.shape[0], 3) - 0.5) * self.aug_noise
+        #ref_points += (np.random.rand(ref_points.shape[0], 3) - 0.5) * self.aug_noise
         src_points += (np.random.rand(src_points.shape[0], 3) - 0.5) * self.aug_noise
 
         return ref_points, src_points, rotation, translation
