@@ -39,6 +39,8 @@ _C.data.dataset_root = osp.join(_C.root_dir, 'data', 'faces')
 # train data
 _C.train = edict()
 _C.train.batch_size = 1
+_C.train.coeff_regressor_batch_size = 32  # larger batch is fine for stage-1 (no backbone graph)
+_C.train.coeff_regressor_num_workers = 4  # fewer workers to avoid shm exhaustion at larger batch
 _C.train.num_workers = 12
 _C.train.point_limit = 30000
 _C.train.max_samples = None
@@ -107,10 +109,10 @@ _C.model.max_superpoints = 500
 
 # encoder selection: 'pointnetpp' = FPS+kNN encoder (predicts coeffs + scale from raw coords)
 #                    'mlp'        = simple MLP encoder (predicts coeffs + scale from raw coords)
-_C.model.coeff_encoder_type = 'mlp'
+_C.model.coeff_encoder_type = 'pointnetpp'
 
 # coeff regressor hyperparams
-_C.model.coeff_regressor_feature_dim = 512
+_C.model.coeff_regressor_feature_dim = 128
 # pointnetpp-only
 _C.model.coeff_regressor_sampled_points = 32
 _C.model.coeff_regressor_k_neighbors = 64

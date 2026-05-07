@@ -35,7 +35,7 @@ train-faces-downsampled:
 	docker run --rm -d --runtime nvidia \
             --gpus all \
             -h geotransformer \
-			-e CUDA_VISIBLE_DEVICES=0 \
+			-e CUDA_VISIBLE_DEVICES=1 \
 	    	-v "$(PWD)":/workspace/src \
 			-v /data:/data \
 			-v ~/clearml.conf:/root/clearml.conf:ro \
@@ -43,3 +43,16 @@ train-faces-downsampled:
 			--name geotransformer-train \
 			--shm-size=64g \
 			geotransformer python trainval_downsampled.py
+
+train-coeff-regressor:
+	docker run --rm -d --runtime nvidia \
+            --gpus all \
+            -h geotransformer \
+			-e CUDA_VISIBLE_DEVICES=0 \
+	    	-v "$(PWD)":/workspace/src \
+			-v /data:/data \
+			-v ~/clearml.conf:/root/clearml.conf:ro \
+	    	-w=/workspace/src/experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn \
+			--name geotransformer-train-coeff \
+			--shm-size=64g \
+			geotransformer python trainval_coeff_regressor.py
