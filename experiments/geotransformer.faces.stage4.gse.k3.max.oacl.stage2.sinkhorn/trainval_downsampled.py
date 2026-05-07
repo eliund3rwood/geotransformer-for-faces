@@ -17,13 +17,14 @@ from config import make_cfg
 from dataset import train_valid_data_loader
 from model import create_model
 from loss import OverallLoss, Evaluator
-from viz import render_registration_figure
+from viz import render_registration_figure, render_registration_3d
 import os.path as osp
 
 class Trainer(EpochBasedTrainer):
-    def __init__(self, cfg, output_model=None):
+    def __init__(self, cfg, output_model=None, clearml_task=None):
         self.cfg = cfg
         self.output_model = output_model
+        self.clearml_task = clearml_task
         super().__init__(cfg, max_epoch=cfg.optim.max_epoch, save_all_snapshots=cfg.optim.save_all_snapshots)
 
         # dataloader
@@ -116,14 +117,26 @@ class Trainer(EpochBasedTrainer):
 
     def _log_registration_figures(self, tag_prefix='val/registration'):
         for i, sample in enumerate(self._vis_samples):
-            fig = render_registration_figure(
+            title = f'Epoch {self.epoch} — sample {i + 1}'
+            fig2d = render_registration_figure(
                 sample['ref_pts'],
                 sample['src_pts'],
                 sample['estimated_T'],
-                title=f'Epoch {self.epoch} — sample {i + 1}',
+                title=title,
             )
-            self.writer.add_figure(f'{tag_prefix}/sample_{i + 1}', fig, self.epoch)
-            plt.close(fig)
+            self.writer.add_figure(f'{tag_prefix}/sample_{i + 1}', fig2d, self.epoch)
+            plt.close(fig2d)
+            if self.clearml_task:
+                fig3d = render_registration_3d(
+                    sample['ref_pts'], sample['src_pts'], sample['estimated_T'],
+                    title=title,
+                )
+                self.clearml_task.get_logger().report_plotly(
+                    title=f'{tag_prefix}/sample_{i + 1}',
+                    series='3D',
+                    iteration=self.epoch,
+                    figure=fig3d,
+                )
         self.logger.info(
             f'Registration figures written to TensorBoard at epoch {self.epoch} '
             f'({len(self._vis_samples)} samples).'
@@ -264,14 +277,28 @@ class Trainer(EpochBasedTrainer):
             with torch.no_grad():
                 output_dict = self.model(data_dict)
             pred_scale = output_dict['pred_scale'].item()
-            fig = render_registration_figure(
+            title = f'Epoch {self.epoch} — {name} (pred_scale={pred_scale:.3f})'
+            fig2d = render_registration_figure(
                 output_dict['ref_points'],
                 output_dict['src_points'],
                 output_dict['estimated_transform'],
-                title=f'Epoch {self.epoch} — {name} (pred_scale={pred_scale:.3f})',
+                title=title,
             )
-            self.writer.add_figure(f'val/debug_registration/{name}', fig, self.epoch)
-            plt.close(fig)
+            self.writer.add_figure(f'val/debug_registration/{name}', fig2d, self.epoch)
+            plt.close(fig2d)
+            if self.clearml_task:
+                fig3d = render_registration_3d(
+                    output_dict['ref_points'],
+                    output_dict['src_points'],
+                    output_dict['estimated_transform'],
+                    title=title,
+                )
+                self.clearml_task.get_logger().report_plotly(
+                    title=f'val/debug_registration/{name}',
+                    series='3D',
+                    iteration=self.epoch,
+                    figure=fig3d,
+                )
         self.logger.info(f'Debug registration figures written to TensorBoard at epoch {self.epoch}.')
 
     def checkpoint(self):
@@ -305,7 +332,7 @@ def main():
     task = Task.init(project_name='Geotransformer Faces', task_name=run_name,  auto_connect_frameworks={'pytorch': False}  )
     task.connect(dict(cfg))
     output_model = OutputModel(task=task, framework="PyTorch")
-    trainer = Trainer(cfg, output_model=output_model)
+    trainer = Trainer(cfg, output_model=output_model, clearml_task=task)
     trainer.run()
 
 

@@ -1,7 +1,8 @@
-"""Visualization utilities for registration results in TensorBoard."""
+"""Visualization utilities for registration results in TensorBoard and ClearML."""
 
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 
 def _to_numpy(x):
@@ -52,4 +53,31 @@ def render_registration_figure(ref_pts, src_pts, estimated_T, title="", max_pts=
 
     plt.suptitle(title, fontsize=13, fontweight='bold')
     plt.tight_layout()
+    return fig
+
+
+def render_registration_3d(ref_pts, src_pts, estimated_T, title="", max_pts=3000):
+    """
+    Interactive Plotly 3D scatter of ref and registered src.
+    Returns a plotly Figure for logging via ClearML report_plotly.
+    """
+    ref_np = _subsample(_to_numpy(ref_pts), max_pts)
+    src_np = _subsample(_to_numpy(src_pts), max_pts)
+    src_aligned = _apply_transform(src_np, _to_numpy(estimated_T))
+
+    fig = go.Figure([
+        go.Scatter3d(
+            x=ref_np[:, 0], y=ref_np[:, 1], z=ref_np[:, 2],
+            mode='markers',
+            marker=dict(size=1.5, color='steelblue', opacity=0.5),
+            name='ref (morphed)',
+        ),
+        go.Scatter3d(
+            x=src_aligned[:, 0], y=src_aligned[:, 1], z=src_aligned[:, 2],
+            mode='markers',
+            marker=dict(size=1.5, color='tomato', opacity=0.5),
+            name='src (registered)',
+        ),
+    ])
+    fig.update_layout(title=title, scene=dict(aspectmode='data'))
     return fig

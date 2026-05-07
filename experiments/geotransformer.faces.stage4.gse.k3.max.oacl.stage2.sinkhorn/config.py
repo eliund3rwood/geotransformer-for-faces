@@ -41,21 +41,21 @@ _C.train = edict()
 _C.train.batch_size = 1
 _C.train.num_workers = 12
 _C.train.point_limit = 30000
-_C.train.max_samples = 100
+_C.train.max_samples = None
 _C.train.use_augmentation = True
 _C.train.augmentation_noise = 0.05
 _C.train.augmentation_rotation = 0.0
 _C.train.use_sphere_dropout = False
 _C.train.p_sphere_dropout = 0.4
 _C.train.use_multiplane_crop = False
-_C.train.p_multiplane_crop = 0.6
+_C.train.p_multiplane_crop = 0.4
 
 # test data
 _C.test = edict()
 _C.test.batch_size = 1
 _C.test.num_workers = 8
 _C.test.point_limit = None
-_C.test.max_samples = 10
+_C.test.max_samples = None
 
 # evaluation
 _C.eval = edict()
