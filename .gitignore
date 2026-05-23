@@ -8,7 +8,7 @@ build/
 
 # Ignore data directories
 data/
-scans/
+planck_scans/
 output/
 UHM_downsampled/
 UHM_generated_data/
@@ -26,3 +26,5 @@ zzz.py
 experiments\geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn\pick_points.ipynb
 .claudeignore
 CLAUDE.md
+coefficient_prediction/
+experiments/geotransformer.faces.stage4.gse.k3.max.oacl.stage2.sinkhorn/*.npy

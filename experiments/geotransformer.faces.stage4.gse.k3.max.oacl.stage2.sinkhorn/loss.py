@@ -63,25 +63,25 @@ class FineMatchingLoss(nn.Module):
         src_node_corr_knn_points = apply_transform(src_node_corr_knn_points, transform)
         dists = pairwise_distance(ref_node_corr_knn_points, src_node_corr_knn_points)  # (B, N, M)
         gt_masks = torch.logical_and(ref_node_corr_knn_masks.unsqueeze(2), src_node_corr_knn_masks.unsqueeze(1))
-        gt_corr_map = torch.lt(dists, self.positive_radius ** 2)
-        gt_corr_map = torch.logical_and(gt_corr_map, gt_masks)
-        slack_row_labels = torch.logical_and(torch.eq(gt_corr_map.sum(2), 0), ref_node_corr_knn_masks)
-        slack_col_labels = torch.logical_and(torch.eq(gt_corr_map.sum(1), 0), src_node_corr_knn_masks)
 
-        labels = torch.zeros_like(matching_scores, dtype=torch.bool)
-        labels[:, :-1, :-1] = gt_corr_map
-        labels[:, :-1, -1] = slack_row_labels
-        labels[:, -1, :-1] = slack_col_labels
+        with torch.no_grad():
+            gt_corr_map = torch.lt(dists, self.positive_radius ** 2) & gt_masks
+            slack_row_labels = torch.logical_and(gt_corr_map.sum(2).eq(0), ref_node_corr_knn_masks)
+            slack_col_labels = torch.logical_and(gt_corr_map.sum(1).eq(0), src_node_corr_knn_masks)
+            hard_pos_mask = gt_corr_map.float()
 
+        pos_loss = -(matching_scores[:, :-1, :-1] * hard_pos_mask).sum() / hard_pos_mask.sum().clamp(min=1e-6)
 
-        valid_matches = matching_scores[labels]
-        if valid_matches.numel() > 0:
-            loss = -valid_matches.mean()
-        else:
-            # Return 0.0 as a tensor so gradients can still flow from other losses
-            loss = torch.tensor(0.0, device=matching_scores.device, requires_grad=True)
+        # Hard slack (dustbin) loss — unchanged behavior
+        slack_scores = []
+        if slack_row_labels.any():
+            slack_scores.append(matching_scores[:, :-1, -1][slack_row_labels])
+        if slack_col_labels.any():
+            slack_scores.append(matching_scores[:, -1, :-1][slack_col_labels])
+        slack_loss = (-torch.cat(slack_scores).mean()
+                      if slack_scores else torch.tensor(0.0, device=matching_scores.device))
 
-        return loss
+        return pos_loss + slack_loss
     
     
 class MorphableLoss(nn.Module):
@@ -186,67 +186,40 @@ class MorphableLoss(nn.Module):
         
         return loss_z
 
-class ScaleLoss(nn.Module):
-    def __init__(self, cfg):
-        super(ScaleLoss, self).__init__()
-
-    def forward(self, output_dict, data_dict):
-        # Supervise the predicted scale against the ground truth augmentation scale
-        pred_scale = output_dict['pred_scale']
-        gt_scale = data_dict['gt_scale']
-        loss_scale = F.l1_loss(pred_scale, gt_scale)
-        
-        return loss_scale    
-
-
-
 class OverallLoss(nn.Module):
     def __init__(self, cfg):
         super(OverallLoss, self).__init__()
         self.coarse_loss = CoarseMatchingLoss(cfg)
         self.fine_loss = FineMatchingLoss(cfg)
         self.morph_loss = MorphableLoss(cfg)
-        self.scale_loss = ScaleLoss(cfg) # Register new loss
 
         self.weight_coarse_loss = cfg.loss.weight_coarse_loss
         self.weight_fine_loss = cfg.loss.weight_fine_loss
         self.weight_morph_loss = 1.0
-        self.weight_scale_loss = 1.0
 
     def forward(self, output_dict, data_dict, epoch=None, iteration=None, mode='train'):
-        # 1. Base losses (always active)
         morph_loss = self.morph_loss(output_dict, data_dict, epoch, iteration, mode=mode)
-        scale_loss = self.scale_loss(output_dict, data_dict)
 
-        # Initialize matching losses to 0
         coarse_loss = torch.tensor(0.0).cuda()
         fine_loss = torch.tensor(0.0).cuda()
 
-        # 2. Curriculum Learning Schedule
         if mode == 'train' and epoch is not None:
-            # Stage 1: Epochs 1-2 (Warmup Morph/Scale only)
-            # Both coarse and fine remain 0.0
-            
-            # Stage 2: Full Training
-            if epoch > 2:
+            if epoch > 1 or (epoch == 1 and iteration is not None and iteration >= 250):
                 coarse_loss = self.coarse_loss(output_dict)
                 fine_loss = self.fine_loss(output_dict, data_dict)
         else:
-            # During validation/testing, we want to calculate all losses to track metrics
             coarse_loss = self.coarse_loss(output_dict)
             fine_loss = self.fine_loss(output_dict, data_dict)
 
-        loss = (self.weight_coarse_loss * coarse_loss + 
-                self.weight_fine_loss * fine_loss + 
-                self.weight_morph_loss * morph_loss + 
-                self.weight_scale_loss * scale_loss)
+        loss = (self.weight_coarse_loss * coarse_loss +
+                self.weight_fine_loss * fine_loss +
+                self.weight_morph_loss * morph_loss)
 
         return {
             'loss': loss,
             'c_loss': coarse_loss,
             'f_loss': fine_loss,
             'm_loss': morph_loss,
-            's_loss': scale_loss 
         }
 
 

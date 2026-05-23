@@ -15,9 +15,10 @@ def train_valid_data_loader(cfg, distributed, val_aug_scale=1.0, val_aug_subsamp
         augmentation_noise=cfg.train.augmentation_noise,
         augmentation_rotation=cfg.train.augmentation_rotation,
         # ======================================
-        aug_scale_min=0.5,
-        aug_scale_max=1.5,
+        aug_scale_min=0.95,
+        aug_scale_max=1.05,
         aug_subsample_keep_min=0.5,
+        aug_voxel_sizes=[0.03, 0.04, 0.05, 0.06],
         # ======================================
     )
     neighbor_limits = calibrate_neighbors_stack_mode(

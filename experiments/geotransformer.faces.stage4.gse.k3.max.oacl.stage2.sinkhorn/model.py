@@ -13,72 +13,60 @@ from geotransformer.modules.geotransformer import (
     SuperPointTargetGenerator,
     LocalGlobalRegistration,
 )
-from pytorch3d.ops import sample_farthest_points
 from backbone import KPConvFPN
 
 class CrossAttentionRegressor(nn.Module):
-    def __init__(self, feature_dim=256, num_patches=32, num_coeffs=100, nhead=4, num_layers=2):
+    def __init__(self, feature_dim=256, num_patches=32, num_coeffs=100, nhead=4, num_layers=2,
+                 backbone_dim=1024):
         super().__init__()
         self.num_patches = num_patches
         self.feature_dim = feature_dim
-        
-        # 32 learnable tokens
+
+        # 32 learnable anatomical patch tokens (queries)
         self.patch_tokens = nn.Parameter(torch.randn(1, num_patches, feature_dim))
-        
+
         # Cross-Attention Decoder
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model=feature_dim, 
-            nhead=nhead, 
+            d_model=feature_dim,
+            nhead=nhead,
             dim_feedforward=feature_dim * 2,
             batch_first=True,
-            norm_first=True 
+            norm_first=True,
         )
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
-        
-        # NEW: Point encoder to lift 3D coordinates to feature_dim
-        self.point_encoder = nn.Sequential(
-            nn.Linear(3, 64),
-            nn.ReLU(),
-            nn.Linear(64, 256),
-            nn.ReLU(),
-            nn.Linear(256, feature_dim)
-        )
-        
-        # Final proj from feature_dim -> 100 PCA coeffs + 1 Scale
-        self.output_proj = nn.Linear(feature_dim, num_coeffs + 1)
-        
-        # Start scale at exactly 1.0
-        with torch.no_grad():
-            nn.init.constant_(self.output_proj.bias[0], 0.0)
-        
-    def forward(self, src_coords_padded, src_padding_mask):
 
-        # Pass raw coordinates through MLP
-        src_feats_encoded = self.point_encoder(src_coords_padded)
+        # Project pre-transformer backbone src feats (backbone_dim) → feature_dim
+        self.feature_proj = nn.Linear(backbone_dim, feature_dim)
 
-        # Align tokens to match input batch size
-        B = src_coords_padded.shape[0]
-        tokens = self.patch_tokens.expand(B, -1, -1)
-        
-        # Cross Attention
-        updated_tokens = self.transformer_decoder(
-            tgt=tokens, 
-            memory=src_feats_encoded,
-            memory_key_padding_mask=src_padding_mask
-        ) 
-        
-        # Project to 101 values
-        raw_output = self.output_proj(updated_tokens) # Shape: [B, 32, 101]
+        # Project concatenated correspondence pairs (2 * feature_dim) → feature_dim
+        self.corr_proj = nn.Linear(feature_dim * 2, feature_dim)
 
-        # Scale Constraint 
-        # Map raw logits for index 0 to [0.4, 1.6]
-        scale_logits = raw_output[:, :, 0].mean(dim=1) 
-        pred_scale = 0.4 + 1.2 * torch.sigmoid(scale_logits)
-        
-        # Keep the remaining 100 indices for the per-patch PCA coefficients [B, 32, 100]
-        coeffs = raw_output[:, :, 1:] 
-        
-        return coeffs, pred_scale
+        # Final projection: feature_dim → num_coeffs PCA coefficients per patch
+        self.output_proj = nn.Linear(feature_dim, num_coeffs)
+
+    def forward(self, ref_feats_post, src_feats_post, src_feats_backbone,
+                ref_corr_feats, src_corr_feats):
+        # ref_feats_post:     [N_ref_c,  feature_dim]  post-transformer normalized ref feats
+        # src_feats_post:     [N_src_c,  feature_dim]  post-transformer normalized src feats
+        # src_feats_backbone: [N_src_c,  backbone_dim] pre-transformer backbone src feats
+        # ref_corr_feats:     [num_corr, feature_dim]  ref feats at matched superpoint nodes
+        # src_corr_feats:     [num_corr, feature_dim]  src feats at matched superpoint nodes
+
+        backbone_proj = self.feature_proj(src_feats_backbone)           # [N_src_c,  feature_dim]
+        corr_proj = self.corr_proj(
+            torch.cat([ref_corr_feats, src_corr_feats], dim=1)          # [num_corr, 2*feature_dim]
+        )                                                                 # [num_corr, feature_dim]
+
+        # Build memory: all per-node features + projected correspondence pairs
+        memory = torch.cat(
+            [ref_feats_post, src_feats_post, backbone_proj, corr_proj], dim=0
+        ).unsqueeze(0)                                                    # [1, N_total, feature_dim]
+
+        tokens = self.patch_tokens                                        # [1, num_patches, feature_dim]
+        updated = self.transformer_decoder(tgt=tokens, memory=memory)    # [1, num_patches, feature_dim]
+
+        z_delta = self.output_proj(updated).squeeze(0)                   # [num_patches, num_coeffs]
+        return z_delta
 
 class GeoTransformer(nn.Module):
     def __init__(self, cfg):
@@ -99,11 +87,12 @@ class GeoTransformer(nn.Module):
         self.register_buffer("z_template", gt_z_mean)
 
         self.coeff_regressor = CrossAttentionRegressor(
-            feature_dim=1024,
+            feature_dim=cfg.geotransformer.output_dim,
             num_patches=32,
             num_coeffs=100,
             nhead=4,
-            num_layers=2
+            num_layers=2,
+            backbone_dim=cfg.geotransformer.input_dim,
         )
 
         self.backbone = KPConvFPN(
@@ -196,107 +185,73 @@ class GeoTransformer(nn.Module):
     def forward(self, data_dict):
         output_dict = {}
 
-        # --- 1. Extract raw src ---
-        # Robustly handle both precomputed lists and raw flat tensors
+        # --- 1. Extract raw src/ref from flat data ---
         if isinstance(data_dict['lengths'], list):
-            # Dataloader is still precomputing! Extract the stage 0 flat tensors.
             flat_lengths = data_dict['lengths'][0]
             flat_points = data_dict['points'][0]
         else:
-            # precompute_data=False worked as intended
             flat_lengths = data_dict['lengths']
             flat_points = data_dict['points']
 
         ref_length_stage0 = flat_lengths[0].item()
         src_points_raw = flat_points[ref_length_stage0:]
 
-        # --- 2. Predict Scale & Coeffs from Raw Points ---
-        num_samples = 1024
-        num_src_points = src_points_raw.shape[0]
-
-        if num_src_points > num_samples:
-            src_coords_batched, _ = sample_farthest_points(src_points_raw.unsqueeze(0), K=num_samples)
-        else:
-            src_coords_batched = src_points_raw.unsqueeze(0)
-
-        padding_mask = torch.zeros((1, src_coords_batched.shape[1]), dtype=torch.bool, device=src_points_raw.device)
-
-        centroid = src_coords_batched.mean(dim=1, keepdim=True)
-        src_coords_centered = src_coords_batched - centroid
-
-        z_delta_batched, pred_scale_batched = self.coeff_regressor(src_coords_centered, padding_mask)
-
-        z_delta = z_delta_batched.squeeze(0)
-        pred_scale = pred_scale_batched.squeeze()
-
-        output_dict['z_coefficients'] = z_delta
-        output_dict['pred_scale'] = pred_scale
-
-        # --- 3. Morph Ref Points and Dynamically Compute Graph ---
+        # --- 2. Build graph on avg_ref + src (no scaling, no morphing yet) ---
         with torch.no_grad():
-            new_ref_points = self.generate_reference_geometry(z_delta.detach())
-            output_dict['morphed_full'] = new_ref_points
-
-            gt_z = data_dict['gt_z']
-            recon_gt_points = self.generate_reference_geometry(gt_z)
-            output_dict['recon_gt_points'] = recon_gt_points
-
-            # Scale the raw source points
-            src_points_scaled = src_points_raw / pred_scale.detach()
-
-            # Combine morphed ref and scaled src into a single tensor
-            new_points = torch.cat([new_ref_points, src_points_scaled], dim=0)
-
-            # Extract the device so we can return the graph to the GPU
-            device = new_points.device
-
-            # The graph-building ops expect tensors on the CPU
+            device = flat_points.device
             graph_dict = precompute_data_stack_mode(
-                new_points.cpu(), 
-                flat_lengths.cpu(), # <--- Safely using the 1D tensor
-                self.num_stages, 
-                self.init_voxel_size, 
-                self.init_radius, 
-                self.neighbor_limits
+                flat_points.cpu(),
+                flat_lengths.cpu(),
+                self.num_stages,
+                self.init_voxel_size,
+                self.init_radius,
+                self.neighbor_limits,
             )
-
-            # Move the computed lists of tensors back to the GPU
             for key in ['points', 'lengths', 'neighbors', 'subsampling', 'upsampling']:
                 if key in graph_dict:
                     graph_dict[key] = [t.to(device) for t in graph_dict[key]]
-
-            # Overwrite the flat data_dict properties with the newly computed graph lists
             data_dict.update(graph_dict)
 
-        # --- 4. Run Backbone on dynamically computed graph ---
+        # --- 3. Backbone ---
         feats_list = self.backbone(data_dict['features'], data_dict)
+        feats_c = feats_list[-1]   # coarse backbone features [N_all_c, backbone_dim]
+        feats_f = feats_list[0]    # fine backbone features   [N_all_f, output_dim]
 
-        feats_c = feats_list[-1]
-        feats_f = feats_list[0]
-
-        # --- 5. Extract Points and Features ---
+        # --- 4. Extract points and split ref / src ---
         ref_length_c = data_dict['lengths'][-1][0].item()
         ref_length_f = data_dict['lengths'][1][0].item()
-        ref_length = data_dict['lengths'][0][0].item()
+        ref_length   = data_dict['lengths'][0][0].item()
 
         points_c = data_dict['points'][-1].detach()
         points_f = data_dict['points'][1].detach()
-        points = data_dict['points'][0].detach()
+        points   = data_dict['points'][0].detach()
 
         ref_points_c = points_c[:ref_length_c]
         src_points_c = points_c[ref_length_c:]
         ref_points_f = points_f[:ref_length_f]
         src_points_f = points_f[ref_length_f:]
-        ref_points = points[:ref_length]
-        src_points = points[ref_length:]
+        ref_points   = points[:ref_length]
+        src_points   = points[ref_length:]
 
-        output_dict['ref_points_c'] = ref_points_c
         output_dict['src_points_c'] = src_points_c
-        output_dict['ref_points_f'] = ref_points_f
         output_dict['src_points_f'] = src_points_f
-        output_dict['ref_points'] = ref_points
-        output_dict['src_points'] = src_points
+        output_dict['src_points']   = src_points
 
+        # Save pre-transformer backbone src coarse features for the coefficient regressor
+        src_feats_c_backbone = feats_c[ref_length_c:]   # [N_src_c, backbone_dim]
+
+        # Training: random src coarse node dropout so transformer sees sparser graphs (like real scans).
+        # Must happen BEFORE point_to_node_partition so all downstream tensors are consistently n_keep-sized.
+        if self.training:
+            n_src_c = src_points_c.shape[0]
+            keep_frac = torch.empty(1).uniform_(0.4, 1.0).item()
+            n_keep = max(int(n_src_c * keep_frac), 24)
+            keep_idx = torch.randperm(n_src_c, device=src_points_c.device)[:n_keep].sort().values
+            src_points_c = src_points_c[keep_idx]
+            src_feats_c_backbone = src_feats_c_backbone[keep_idx]
+            output_dict['src_points_c'] = src_points_c
+
+        # --- 5. Node partition (on avg_ref; indices are stable across morphing) ---
         _, ref_node_masks, ref_node_knn_indices, ref_node_knn_masks = point_to_node_partition(
             ref_points_f, ref_points_c, self.num_points_in_patch
         )
@@ -304,36 +259,24 @@ class GeoTransformer(nn.Module):
             src_points_f, src_points_c, self.num_points_in_patch
         )
 
-        ref_padded_points_f = torch.cat([ref_points_f, torch.zeros_like(ref_points_f[:1])], dim=0)
         src_padded_points_f = torch.cat([src_points_f, torch.zeros_like(src_points_f[:1])], dim=0)
-        ref_node_knn_points = index_select(ref_padded_points_f, ref_node_knn_indices, dim=0)
         src_node_knn_points = index_select(src_padded_points_f, src_node_knn_indices, dim=0)
 
         transform = data_dict['transform'].detach()
-    
-        gt_node_corr_indices, gt_node_corr_overlaps = get_node_correspondences(
-            ref_points_c,
-            src_points_c,
-            ref_node_knn_points,
-            src_node_knn_points,
-            transform,
-            self.matching_radius,
-            ref_masks=ref_node_masks,
-            src_masks=src_node_masks,
-            ref_knn_masks=ref_node_knn_masks,
-            src_knn_masks=src_node_knn_masks,
-        )
 
-        output_dict['gt_node_corr_indices'] = gt_node_corr_indices
-        output_dict['gt_node_corr_overlaps'] = gt_node_corr_overlaps
+        ref_feats_f = feats_f[:ref_length_f]
+        src_feats_f = feats_f[ref_length_f:]
+        output_dict['ref_feats_f'] = ref_feats_f
+        output_dict['src_feats_f'] = src_feats_f
 
-        ref_feats_c = feats_c[:ref_length_c]
-        src_feats_c = feats_c[ref_length_c:]
+        # --- 6. Geometric Transformer ---
+        ref_feats_c_pre = feats_c[:ref_length_c]
+        src_feats_c_pre = src_feats_c_backbone  # already subsampled during training
         ref_feats_c, src_feats_c = self.transformer(
             ref_points_c.unsqueeze(0),
             src_points_c.unsqueeze(0),
-            ref_feats_c.unsqueeze(0),
-            src_feats_c.unsqueeze(0),
+            ref_feats_c_pre.unsqueeze(0),
+            src_feats_c_pre.unsqueeze(0),
         )
         ref_feats_c_norm = F.normalize(ref_feats_c.squeeze(0), p=2, dim=1)
         src_feats_c_norm = F.normalize(src_feats_c.squeeze(0), p=2, dim=1)
@@ -341,42 +284,90 @@ class GeoTransformer(nn.Module):
         output_dict['ref_feats_c'] = ref_feats_c_norm
         output_dict['src_feats_c'] = src_feats_c_norm
 
-        ref_feats_f = feats_f[:ref_length_f]
-        src_feats_f = feats_f[ref_length_f:]
-        output_dict['ref_feats_f'] = ref_feats_f
-        output_dict['src_feats_f'] = src_feats_f
-
+        # --- 7. Coarse matching (predicted correspondences) ---
         with torch.no_grad():
             ref_node_corr_indices, src_node_corr_indices, node_corr_scores = self.coarse_matching(
                 ref_feats_c_norm, src_feats_c_norm, ref_node_masks, src_node_masks
             )
-
+            # Saved for evaluation (predicted, before any GT override)
             output_dict['ref_node_corr_indices'] = ref_node_corr_indices
             output_dict['src_node_corr_indices'] = src_node_corr_indices
+
+        # --- 8. Coefficient regression using superpoint correspondence features ---
+        # Extract aligned feature pairs at matched superpoint nodes
+        ref_corr_feats = ref_feats_c_norm[ref_node_corr_indices]   # [num_corr, feature_dim]
+        src_corr_feats = src_feats_c_norm[src_node_corr_indices]   # [num_corr, feature_dim]
+
+        # z_delta carries gradients; morph_loss backprops through here into transformer+backbone
+        z_delta = self.coeff_regressor(
+            ref_feats_c_norm,
+            src_feats_c_norm,
+            src_feats_c_backbone,
+            ref_corr_feats,
+            src_corr_feats,
+        )   # [32, 100]
+        output_dict['z_coefficients'] = z_delta
+
+        # --- 9. Morph ref, update positions at all backbone levels, then GT correspondences ---
+        gt_z = data_dict['gt_z']
+        with torch.no_grad():
+            output_dict['recon_gt_points'] = self.generate_reference_geometry(gt_z)
+
+            avg_ref_verts  = data_dict['points'][0][:ref_length].detach()
+            fine_ref_idx   = torch.cdist(ref_points_f, avg_ref_verts).argmin(dim=1)
+            coarse_ref_idx = torch.cdist(ref_points_c, avg_ref_verts).argmin(dim=1)
+
+            morphed_ref_full = self.generate_reference_geometry(z_delta.detach())
+            output_dict['morphed_full'] = morphed_ref_full
+
+            ref_points_f = morphed_ref_full[fine_ref_idx]
+            ref_points_c = morphed_ref_full[coarse_ref_idx]
+            output_dict['ref_points_c'] = ref_points_c
+            output_dict['ref_points_f'] = ref_points_f
+            output_dict['ref_points']   = morphed_ref_full
+
+            ref_padded_points_f = torch.cat([ref_points_f, torch.zeros_like(ref_points_f[:1])], dim=0)
+            ref_node_knn_points = index_select(ref_padded_points_f, ref_node_knn_indices, dim=0)
+
+            gt_node_corr_indices, gt_node_corr_overlaps = get_node_correspondences(
+                ref_points_c,
+                src_points_c,
+                ref_node_knn_points,
+                src_node_knn_points,
+                transform,
+                self.matching_radius,
+                ref_masks=ref_node_masks,
+                src_masks=src_node_masks,
+                ref_knn_masks=ref_node_knn_masks,
+                src_knn_masks=src_node_knn_masks,
+            )
+            output_dict['gt_node_corr_indices']  = gt_node_corr_indices
+            output_dict['gt_node_corr_overlaps'] = gt_node_corr_overlaps
 
             if self.training:
                 ref_node_corr_indices, src_node_corr_indices, node_corr_scores = self.coarse_target(
                     gt_node_corr_indices, gt_node_corr_overlaps
                 )
 
-        ref_node_corr_knn_indices = ref_node_knn_indices[ref_node_corr_indices]  
-        src_node_corr_knn_indices = src_node_knn_indices[src_node_corr_indices] 
-        ref_node_corr_knn_masks = ref_node_knn_masks[ref_node_corr_indices] 
-        src_node_corr_knn_masks = src_node_knn_masks[src_node_corr_indices] 
-        ref_node_corr_knn_points = ref_node_knn_points[ref_node_corr_indices] 
-        src_node_corr_knn_points = src_node_knn_points[src_node_corr_indices] 
+        # --- 10. Fine matching on morphed ref ---
+        ref_node_corr_knn_indices = ref_node_knn_indices[ref_node_corr_indices]
+        src_node_corr_knn_indices = src_node_knn_indices[src_node_corr_indices]
+        ref_node_corr_knn_masks   = ref_node_knn_masks[ref_node_corr_indices]
+        src_node_corr_knn_masks   = src_node_knn_masks[src_node_corr_indices]
+        ref_node_corr_knn_points  = ref_node_knn_points[ref_node_corr_indices]
+        src_node_corr_knn_points  = src_node_knn_points[src_node_corr_indices]
 
         ref_padded_feats_f = torch.cat([ref_feats_f, torch.zeros_like(ref_feats_f[:1])], dim=0)
         src_padded_feats_f = torch.cat([src_feats_f, torch.zeros_like(src_feats_f[:1])], dim=0)
-        ref_node_corr_knn_feats = index_select(ref_padded_feats_f, ref_node_corr_knn_indices, dim=0)  
-        src_node_corr_knn_feats = index_select(src_padded_feats_f, src_node_corr_knn_indices, dim=0)  
+        ref_node_corr_knn_feats = index_select(ref_padded_feats_f, ref_node_corr_knn_indices, dim=0)
+        src_node_corr_knn_feats = index_select(src_padded_feats_f, src_node_corr_knn_indices, dim=0)
 
         output_dict['ref_node_corr_knn_points'] = ref_node_corr_knn_points
         output_dict['src_node_corr_knn_points'] = src_node_corr_knn_points
-        output_dict['ref_node_corr_knn_masks'] = ref_node_corr_knn_masks
-        output_dict['src_node_corr_knn_masks'] = src_node_corr_knn_masks
+        output_dict['ref_node_corr_knn_masks']  = ref_node_corr_knn_masks
+        output_dict['src_node_corr_knn_masks']  = src_node_corr_knn_masks
 
-        matching_scores = torch.einsum('bnd,bmd->bnm', ref_node_corr_knn_feats, src_node_corr_knn_feats) 
+        matching_scores = torch.einsum('bnd,bmd->bnm', ref_node_corr_knn_feats, src_node_corr_knn_feats)
         matching_scores = matching_scores / feats_f.shape[1] ** 0.5
         matching_scores = self.optimal_transport(matching_scores, ref_node_corr_knn_masks, src_node_corr_knn_masks)
 
@@ -395,9 +386,9 @@ class GeoTransformer(nn.Module):
                 node_corr_scores,
             )
 
-            output_dict['ref_corr_points'] = ref_corr_points
-            output_dict['src_corr_points'] = src_corr_points
-            output_dict['corr_scores'] = corr_scores
+            output_dict['ref_corr_points']    = ref_corr_points
+            output_dict['src_corr_points']    = src_corr_points
+            output_dict['corr_scores']        = corr_scores
             output_dict['estimated_transform'] = estimated_transform
 
         return output_dict

@@ -30,6 +30,7 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         aug_scale_min=0.5,
         aug_scale_max=1.5,
         aug_subsample_keep_min=0.7,
+        aug_voxel_sizes=None,
         # ======================================
 
         overlap_threshold=None,
@@ -61,6 +62,7 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
         self.aug_scale_min = aug_scale_min
         self.aug_scale_max = aug_scale_max
         self.aug_subsample_keep_min = aug_subsample_keep_min
+        self.aug_voxel_sizes = aug_voxel_sizes if aug_voxel_sizes is not None else []
         # ======================================
 
         with open(osp.join(self.metadata_root, f'{subset}.pkl'), 'rb') as f:
@@ -154,6 +156,15 @@ class ThreeDMatchPairDataset(torch.utils.data.Dataset):
             log_scale = random.uniform(np.log(self.aug_scale_min), np.log(self.aug_scale_max))
             scale_factor = np.exp(log_scale)
             src_points = src_points * scale_factor
+
+            # Voxel-density augmentation: normalize src density to match real scanner uniformity
+            if self.aug_voxel_sizes:
+                vs = random.choice(self.aug_voxel_sizes)
+                coords = np.floor(src_points / vs).astype(np.int32)
+                keys = coords[:, 0] * 1_000_003 + coords[:, 1] * 1_009 + coords[:, 2]
+                _, first_idx = np.unique(keys, return_index=True)
+                if len(first_idx) >= 64:
+                    src_points = src_points[first_idx]
 
         if self.use_augmentation and self.subset == 'val':
             # Subsampling/Upsampling
