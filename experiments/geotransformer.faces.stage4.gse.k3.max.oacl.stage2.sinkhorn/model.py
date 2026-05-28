@@ -75,21 +75,23 @@ class GeoTransformer(nn.Module):
         self.matching_radius = cfg.model.ground_truth_matching_radius
 
         pca_data = torch.load("pca_basis_all.pth")
+        n_comp = cfg.model.num_pca_components
 
-        self.register_buffer("pca_basis", pca_data['basis']) 
-        self.register_buffer("pca_mean", pca_data['mean'])  
-        self.register_buffer("patch_indices", pca_data['patch_indices']) 
+        # Truncate basis and template to the first n_comp components
+        self.register_buffer("pca_basis", pca_data['basis'][:, :n_comp, :])
+        self.register_buffer("pca_mean", pca_data['mean'])
+        self.register_buffer("patch_indices", pca_data['patch_indices'])
 
         self.num_patches = self.patch_indices.shape[0]
-        self.num_components = self.pca_basis.shape[1]
+        self.num_components = self.pca_basis.shape[1]  # == n_comp
 
-        gt_z_mean = torch.mean(pca_data['gt_z'], dim=1)
-        self.register_buffer("z_template", gt_z_mean)
+        gt_z_mean = torch.mean(pca_data['gt_z'], dim=1)  # [32, 100]
+        self.register_buffer("z_template", gt_z_mean[:, :n_comp])
 
         self.coeff_regressor = CrossAttentionRegressor(
             feature_dim=cfg.geotransformer.output_dim,
             num_patches=32,
-            num_coeffs=100,
+            num_coeffs=n_comp,
             nhead=4,
             num_layers=2,
             backbone_dim=cfg.geotransformer.input_dim,
@@ -309,7 +311,8 @@ class GeoTransformer(nn.Module):
         output_dict['z_coefficients'] = z_delta
 
         # --- 9. Morph ref, update positions at all backbone levels, then GT correspondences ---
-        gt_z = data_dict['gt_z']
+        # Truncate gt_z to the configured number of PCA components
+        gt_z = data_dict['gt_z'][:, :self.num_components]
         with torch.no_grad():
             output_dict['recon_gt_points'] = self.generate_reference_geometry(gt_z)
 

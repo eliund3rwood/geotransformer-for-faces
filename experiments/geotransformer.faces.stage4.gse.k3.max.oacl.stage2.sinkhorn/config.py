@@ -92,6 +92,7 @@ _C.model = edict()
 _C.model.ground_truth_matching_radius = 0.05
 _C.model.num_points_in_patch = 64
 _C.model.num_sinkhorn_iterations = 100
+_C.model.num_pca_components = 36  # truncate PCA basis to this many components
 
 # model - Coarse Matching
 _C.coarse_matching = edict()
@@ -141,6 +142,7 @@ _C.fine_loss.positive_radius = 0.05
 _C.loss = edict()
 _C.loss.weight_coarse_loss = 1.0
 _C.loss.weight_fine_loss = 1.0
+_C.loss.weight_morph_loss = 1.0  # balance morphable loss vs coarse/fine matching losses
 
 
 def make_cfg():
